@@ -1,5 +1,4 @@
 #!/bin/sh
-
 # Improved BusyBox-Compatible Keyboard Kowboys Setup Script
 # Sets up the directory structure and extracts zip content
 
@@ -38,13 +37,66 @@ get_architecture() {
     esac
 }
 
+# Check if BusyBox is available, install it if needed
+if ! command -v busybox > /dev/null 2>&1; then
+    echo "BusyBox is not installed. Installing static BusyBox..."
+    
+    # Check if wget or curl is available for downloading
+    if command -v wget > /dev/null 2>&1; then
+        DL_CMD="wget --no-check-certificate -q"
+    elif command -v curl > /dev/null 2>&1; then
+        DL_CMD="curl -k -L -o busybox"
+    else
+        echo "Error: Neither wget nor curl is available. Cannot download BusyBox."
+        exit 1
+    fi
+    
+    # Create a temporary directory
+    TEMP_DIR=$(mktemp -d)
+    BUSYBOX_BINARY="$TEMP_DIR/busybox"
+    
+    echo "Downloading static BusyBox..."
+    if command -v wget > /dev/null 2>&1; then
+        wget --no-check-certificate -q "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox" -O "$BUSYBOX_BINARY"
+    else
+        curl -k -L -o "$BUSYBOX_BINARY" "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox"
+    fi
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to download BusyBox."
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # Make the binary executable
+    chmod +x "$BUSYBOX_BINARY"
+    
+    # Install BusyBox to local directory
+    cp "$BUSYBOX_BINARY" ./busybox
+    chmod +x ./busybox
+    echo "BusyBox installed to $(pwd)/busybox"
+    
+    # Set BUSYBOX_CMD to use our local copy
+    BUSYBOX_CMD="./busybox"
+    
+    # Clean up temp directory
+    rm -rf "$TEMP_DIR"
+else
+    BUSYBOX_CMD="busybox"
+    echo "BusyBox is already installed."
+fi
+
 # Check if curl is available, install it if needed
 if ! command -v curl > /dev/null 2>&1; then
     echo "curl is not installed. Installing..."
     
-    # Check if wget is available
-    if ! command -v wget > /dev/null 2>&1; then
-        echo "Error: Neither curl nor wget is installed. Please install one of them first."
+    # Check if wget is available or use our BusyBox wget
+    if command -v wget > /dev/null 2>&1; then
+        DL_CMD="wget --no-check-certificate -q"
+    elif [ -n "$BUSYBOX_CMD" ]; then
+        DL_CMD="$BUSYBOX_CMD wget --no-check-certificate -q"
+    else
+        echo "Error: Neither curl, wget, nor BusyBox wget is available."
         exit 1
     fi
     
@@ -61,7 +113,11 @@ if ! command -v curl > /dev/null 2>&1; then
     CURL_BINARY="$TEMP_DIR/curl"
     
     echo "Downloading curl for $ARCH architecture..."
-    wget --no-check-certificate -q "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-$ARCH" -O "$CURL_BINARY"
+    if command -v wget > /dev/null 2>&1; then
+        wget --no-check-certificate -q "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-$ARCH" -O "$CURL_BINARY"
+    elif [ -n "$BUSYBOX_CMD" ]; then
+        $BUSYBOX_CMD wget --no-check-certificate -q "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-$ARCH" -O "$CURL_BINARY"
+    fi
     
     if [ $? -ne 0 ]; then
         echo "Error: Failed to download curl."
@@ -114,10 +170,27 @@ if [ ! -f just-lin.zip ]; then
     exit 1
 fi
 
-# Extract files to a temporary directory to examine the structure
-echo "Examining zip contents..."
+# Extract files to a temporary directory using BusyBox unzip
+echo "Examining zip contents using BusyBox unzip..."
 mkdir -p extract_temp
-unzip -q just-lin.zip -d extract_temp
+
+# Use our installed BusyBox or system BusyBox for unzip
+echo "Using BusyBox unzip..."
+$BUSYBOX_CMD unzip -o just-lin.zip -d extract_temp
+
+# If BusyBox unzip fails, try system unzip as fallback
+if [ $? -ne 0 ]; then
+    echo "BusyBox unzip failed, trying system unzip if available..."
+    if command -v unzip > /dev/null 2>&1; then
+        unzip -o just-lin.zip -d extract_temp
+    else
+        echo "Error: Failed to extract zip file. No working unzip command available."
+        rm -rf "$TMP_DIR"
+        exit 1
+    fi
+fi
+
+# List extracted contents
 ls -la extract_temp
 
 # Check what was extracted
@@ -290,7 +363,7 @@ echo "Keyboard Kowboys environment has been set up successfully!"
 echo "Base directory: $BASE_DIR"
 echo ""
 if [ -x "$BIN_DIR/just" ]; then
-    echo "just command installed at: $BIN_DIR/just"
+    echo "just command installed 
     echo ""
     if [ "$BIN_DIR" = "/tmp" ]; then
         echo "Since just is installed in /tmp, you can run it using:"
