@@ -274,6 +274,27 @@ audit mode="Audit" list="" filter="":
         exit 1
     }
 
+# Add Wazuh agent to the server
+add-agent server_ip="":
+    #!{{shebang}}
+    Write-Host "=== Keyboard Kowboys add-agent ===" -ForegroundColor Cyan
+    
+    if ([string]::IsNullOrEmpty('{{server_ip}}')) {
+        Write-Host "Usage: just add-agent <server_ip>" -ForegroundColor Yellow
+        exit 1
+    }
+    
+    Write-Host "Server IP {{server_ip}} will be used." -ForegroundColor Green
+    
+    # Execute the Wazuh agent installation script with the server IP
+    & "{{scripts_dir}}\wazuh_agent_install.ps1" "{{server_ip}}"
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: Agent installation failed." -ForegroundColor Red
+        exit 1
+    } else {
+        Write-Host "Agent installation completed successfully." -ForegroundColor Green
+    }
 # Show PowerShell version info
 ps-version:
     #!{{shebang}}
