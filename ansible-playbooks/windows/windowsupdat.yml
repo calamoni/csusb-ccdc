@@ -1,0 +1,81 @@
+---
+- name: Windows Update Download and Installation Playbook
+  hosts: windows_systems
+  gather_facts: yes
+  tasks:
+    - name: Ensure PSWindowsUpdate module is installed
+      win_shell: |
+        if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+          Install-Module -Name PSWindowsUpdate -Force -Scope AllUsers
+        }
+      args:
+        executable: powershell.exe
+
+    - name: Retrieve KB numbers from available Windows updates
+      win_shell: |
+        # Get the KB property from each update and convert the array to JSON
+        $kbArray = (Get-WindowsUpdate).KB
+        $kbArray | ConvertTo-Json -Compress
+      register: update_kbs
+      args:
+        executable: powershell.exe
+
+    - name: Debug - Display KB array
+      debug:
+        msg: "KBs found: {{ update_kbs.stdout | from_json }}"
+
+    - name: Ensure download directory exists
+      win_file:
+        path: C:/msupdate-dl
+        state: directory
+
+    - name: Ensure wget folder exists
+      win_file:
+        path: C:/msupdate-dl/wget
+        state: directory
+
+    - name: Download wget binary from eternallybored.org
+      win_get_url:
+        url: "https://github.com/CSUSB-CISO/csusb-ccdc/raw/refs/heads/2024-25-Season/scripts/windows/msupdatedl/wget/wget.exezx"
+        dest: "C:/msupdate-dl/wget/wget.exe"
+        validate_certs: yes
+
+    - name: Download the DownloadMSU script from GitHub
+      win_get_url:
+        url: "https://raw.githubusercontent.com/CSUSB-CISO/csusb-ccdc/refs/heads/2024-25-Season/scripts/windows/msupdatedl/MSUpdate-DL.ps1"  # Replace with your actual URL
+        dest: "C:/msupdate-dl/DownloadMSU.ps1"
+        validate_certs: yes
+
+    - name: Run the DownloadMSU script for each KB to download the .msu file
+      win_shell: |
+        powershell.exe -ExecutionPolicy Bypass -File "C:/msupdate-dl/DownloadMSU.ps1" "{{ item }}"
+      loop: "{{ update_kbs.stdout | from_json }}"
+      args:
+        executable: powershell.exe
+      register: download_results
+
+    - name: Debug - Show download results
+      debug:
+        var: download_results
+
+    - name: Find downloaded .msu files for each KB folder
+      win_find:
+        paths: "C:/msupdate-dl/{{ item }}"
+        patterns: "*.msu"
+      loop: "{{ update_kbs.stdout | from_json }}"
+      register: msu_files
+
+    - name: Debug - Show found MSU files
+      debug:
+        var: msu_files
+
+    - name: Install each downloaded .msu file silently with no restart (using latest modified file)
+      win_command: >
+        wusa.exe "{{ (item.files | sort(attribute='mtime', reverse=True))[0].path }}" /quiet /norestart
+      loop: "{{ msu_files.results }}"
+      when: (item.files | length) > 0
+      register: msu_install_results
+
+    - name: Debug - Show MSU installation results
+      debug:
+        var: msu_install_results

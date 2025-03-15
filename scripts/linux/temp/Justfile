@@ -1,0 +1,98 @@
+base_dir := "/opt/keyboard_kowboys"
+scripts_dir := base_dir + "/scripts"
+ops_dir := base_dir + "/ops"
+backup_dir := base_dir + "/backups"
+tools_dir := base_dir + "/tools"
+config_dir := base_dir + "/configs"
+log_dir := base_dir + "/logs"
+
+# Show all available commands
+default:
+    @just --list
+
+# Initialize directory structure (run once or after reset)
+init:
+    #!/bin/bash
+    echo "Setting up Keyboard Kowboys operation environment..."
+    sudo mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}}
+    sudo chmod -R 750 {{base_dir}}
+    echo "Directory structure created at {{base_dir}}"
+
+# Run baseline hardening using Chimera
+harden:
+    cd {{ops_dir}} && ./chimera baseline
+
+# Backup critical system files
+backup system_name="all":
+    @echo "Backing up {{system_name}} configurations..."
+    @{{scripts_dir}}/backup.sh {{system_name}} {{backup_dir}}
+
+# Diff current configs against last backup
+diff-configs system_name:
+    @echo "Comparing current {{system_name}} configs with backups..."
+    @{{scripts_dir}}/diff_configs.sh {{system_name}} {{backup_dir}}
+
+# Check all connections
+check-connections level="basic":
+    #!/bin/bash
+    echo "Checking {{level}} network connections..."
+    if [ "{{level}}" = "basic" ]; then
+        ss -tuln
+    else
+        {{scripts_dir}}/deep_connection_scan.sh
+    fi
+
+# Deploy monitoring
+deploy-monitoring:
+    @{{scripts_dir}}/deploy_monitoring.sh
+
+# Verify service integrity
+verify-services critical_only="true":
+    @{{scripts_dir}}/verify_services.sh {{critical_only}}
+
+# Quick integrity check (runs directly in justfile)
+integrity-quick:
+    #!/bin/bash
+    echo "Running quick integrity checks..."
+    find /bin /sbin /usr/bin -type f -exec md5sum {} \; | grep -vf {{backup_dir}}/binaries.md5
+    echo "Checking for new SUID binaries..."
+    find / -perm -4000 2>/dev/null
+
+# Reset firewall to known-good state
+reset-firewall:
+    @{{scripts_dir}}/reset_firewall.sh
+
+# Log review and analysis
+analyze-logs hours="1":
+    @{{scripts_dir}}/log_analyzer.sh {{hours}}
+
+# Create incident response snapshot
+incident-snapshot name:
+    #!/bin/bash
+    echo "Creating incident snapshot: {{name}}"
+    mkdir -p {{backup_dir}}/incidents/{{name}}
+    ps aux > {{backup_dir}}/incidents/{{name}}/processes.txt
+    netstat -tulpn > {{backup_dir}}/incidents/{{name}}/connections.txt
+    lsof > {{backup_dir}}/incidents/{{name}}/open_files.txt
+    journalctl -n 500 > {{backup_dir}}/incidents/{{name}}/recent_logs.txt
+    echo "Snapshot saved to {{backup_dir}}/incidents/{{name}}/"
+
+# Update all tools
+update-tools:
+    @{{scripts_dir}}/update_tools.sh
+
+# Status dashboard - quick overview of system state
+status:
+    #!/bin/bash
+    echo "=== Keyboard Kowboys System Status ==="
+    echo "Time: $(date)"
+    echo "Uptime: $(uptime)"
+    echo "---"
+    echo "Services:"
+    systemctl list-units --state=running --type=service | head -10
+    echo "---"
+    echo "Connections:"
+    ss -tuln | head -10
+    echo "---"
+    echo "Recent Auth Attempts:"
+    grep "authentication failure" /var/log/auth.log 2>/dev/null | tail -5 || echo "No recent auth failures"

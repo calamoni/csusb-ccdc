@@ -1,0 +1,35 @@
+---
+- name: Download, run, and cleanup invoke-ezscript.ps1
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Create folder for scripts if it doesn't exist
+      win_file:
+        path: C:/Temp
+        state: directory
+
+    - name: Download invoke-ezscript.ps1 from GitHub
+      win_get_url:
+        url: "https://raw.githubusercontent.com/CSUSB-CISO/csusb-ccdc/refs/heads/2024-25-Season/scripts/windows/Install-OpenSSH.ps1"  # Replace with your actual URL
+        dest: C:/Temp/invoke-ezscript.ps1
+        validate_certs: yes
+      register: download_result
+
+    - name: Display download result
+      debug:
+        var: download_result
+
+    - name: Run invoke-ezscript.ps1 with execution policy bypass
+      win_command: "powershell.exe -ExecutionPolicy Bypass -File C:/Temp/invoke-ezscript.ps1"
+      register: script_output
+
+    - name: Display script output
+      debug:
+        var: script_output.stdout
+
+    - name: Clean up - remove invoke-ezscript.ps1 file after execution
+      win_file:
+        path: "C:/Temp/invoke-ezscript.ps1"
+        state: absent
+      when: script_output is defined
+

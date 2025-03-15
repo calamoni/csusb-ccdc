@@ -1,0 +1,247 @@
+set shell := ["powershell.exe", "-c"]
+
+base_dir := "C:/KeyboardKowboys"
+scripts_dir := base_dir + "/scripts"
+ops_dir := base_dir + "/ops"
+backup_dir := base_dir + "/backups"
+tools_dir := base_dir + "/tools"
+config_dir := base_dir + "/configs"
+log_dir := base_dir + "/logs"
+
+# Display available commands with descriptions
+default:
+    @just --list
+
+# Display help for recipes and their options
+help recipe="":
+    powershell -Command "if ('{{recipe}}' -eq '') { \
+        Write-Host '===== KEYBOARD KOWBOYS OPERATIONS HELP =====' -ForegroundColor Cyan; \
+        Write-Host 'Usage: just help <recipe>' -ForegroundColor Yellow; \
+        Write-Host ''; \
+        Write-Host 'Available recipes:' -ForegroundColor Green; \
+        just --summary; \
+        Write-Host ''; \
+        Write-Host 'For detailed help on a specific recipe, run: just help <recipe-name>' -ForegroundColor Yellow; \
+    } else { \
+        Write-Host '===== HELP: {{recipe}} =====' -ForegroundColor Cyan; \
+        # Extract specific help for the recipe \
+        if ('{{recipe}}' -eq 'backup') { \
+            Write-Host 'USAGE: just backup [system_name]' -ForegroundColor Yellow; \
+            Write-Host ''; \
+            Write-Host 'DESCRIPTION:' -ForegroundColor Green; \
+            Write-Host 'Creates a backup of system configurations based on the specified system name.'; \
+            Write-Host 'Uses robocopy for incremental backups to improve speed and efficiency.'; \
+            Write-Host 'Also captures a snapshot of current network connections for quick reference.'; \
+            Write-Host ''; \
+            Write-Host 'AVAILABLE BACKUP TYPES:' -ForegroundColor Green; \
+            Write-Host '  all        - Backup all system configurations'; \
+            Write-Host '  network    - Only network-related configurations'; \
+            Write-Host '  firewall   - Firewall rules and configurations'; \
+            Write-Host '  services   - Service definitions and configurations'; \
+            Write-Host '  database   - Database configurations and schemas'; \
+            Write-Host '  web        - Web server configurations'; \
+            Write-Host '  custom     - Custom backup defined in config file'; \
+            Write-Host ''; \
+            Write-Host 'EXAMPLES:' -ForegroundColor Green; \
+            Write-Host '  just backup              # Backup all systems'; \
+            Write-Host '  just backup network      # Backup only network configs'; \
+            Write-Host '  just backup database     # Backup database configs'; \
+        } elseif ('{{recipe}}' -eq 'network-eval') { \
+            Write-Host 'USAGE: just network-eval [level]' -ForegroundColor Yellow; \
+            Write-Host ''; \
+            Write-Host 'DESCRIPTION:' -ForegroundColor Green; \
+            Write-Host 'Examines current network connections at the specified detail level.'; \
+            Write-Host 'Useful for quick network audits or troubleshooting.'; \
+            Write-Host ''; \
+            Write-Host 'OPTIONS:' -ForegroundColor Green; \
+            Write-Host '  level - Detail level (basic/detailed)'; \
+            Write-Host ''; \
+            Write-Host 'EXAMPLES:' -ForegroundColor Green; \
+            Write-Host '  just network-eval           # Basic network connection check'; \
+            Write-Host '  just network-eval detailed  # Detailed network connection analysis'; \
+        } else { \
+            Write-Host 'USAGE: just {{recipe}}' -ForegroundColor Yellow; \
+            Write-Host ''; \
+            Write-Host 'DESCRIPTION:' -ForegroundColor Green; \
+            Write-Host 'No specific help available for this command.'; \
+            Write-Host ''; \
+            Write-Host 'EXAMPLES:' -ForegroundColor Green; \
+            Write-Host '  just {{recipe}}  # Run the {{recipe}} command'; \
+        } \
+    }"
+
+# Initialize directory structure (run once or after reset)
+# 
+# Creates the basic directory structure for keyboard_kowboys operations.
+# This should be run after a fresh install or after a reset.
+# 
+# Usage: just init
+init:
+    powershell -Command "Write-Host 'Setting up keyboard kowboys operation environment...' -ForegroundColor Green; \
+    $Dirs = @('{{base_dir}}', '{{scripts_dir}}', '{{ops_dir}}', '{{backup_dir}}', '{{tools_dir}}', '{{config_dir}}', '{{log_dir}}'); \
+    foreach ($Dir in $Dirs) { \
+        if (-not (Test-Path $Dir)) { \
+            New-Item -Path $Dir -ItemType Directory -Force | Out-Null; \
+            Write-Host ('Created directory: ' + $Dir) -ForegroundColor Yellow; \
+        } else { \
+            Write-Host ('Directory already exists: ' + $Dir) -ForegroundColor Cyan; \
+        } \
+    } \
+    # Set appropriate permissions \
+    $Acl = Get-Acl -Path '{{base_dir}}'; \
+    $Ar = New-Object System.Security.AccessControl.FileSystemAccessRule('Administrators', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'); \
+    $Acl.SetAccessRule($Ar); \
+    Set-Acl -Path '{{base_dir}}' -AclObject $Acl; \
+    Write-Host 'Directory structure created at {{base_dir}}' -ForegroundColor Green;"
+
+# Run baseline hardening
+# 
+# Applies baseline security hardening measures.
+# This strengthens the system against common attacks and vulnerabilities.
+# 
+# Usage: just harden
+harden:
+    powershell -Command "Write-Host 'Running baseline security hardening...' -ForegroundColor Green; \
+    Write-Host 'Note: This requires a hardening script which is not currently available.' -ForegroundColor Yellow;"
+
+# Back up critical system files
+# 
+# Creates a backup of system configurations based on the specified system name.
+# Uses robocopy for incremental backups to improve speed and efficiency.
+# Also captures a snapshot of current network connections for quick reference.
+# 
+# Options:
+#   system_name - Type of system to back up (default: "all")
+#                 Valid options: all, network, firewall, services, database, web, custom
+# 
+# Usage: 
+#   just backup              # Back up all configurations
+#   just backup network      # Back up only network configurations
+#   just backup firewall     # Back up only firewall settings
+#   just backup database     # Back up database configurations
+backup system_name="all":
+    powershell -Command "Write-Host 'Backing up {{system_name}} configurations and system state...' -ForegroundColor Green; \
+    # Set environment variables \
+    $env:KK_BASE_DIR = '{{base_dir}}'; \
+    $env:KK_CONFIG_DIR = '{{config_dir}}'; \
+    $env:KK_LOG_DIR = '{{log_dir}}'; \
+    $env:KK_BACKUP_DIR = '{{backup_dir}}'; \
+    \
+    # Create backup directory if it doesn't exist \
+    if (-not (Test-Path '{{backup_dir}}/{{system_name}}')) { \
+        New-Item -Path '{{backup_dir}}/{{system_name}}' -ItemType Directory -Force | Out-Null; \
+    } \
+    \
+    # Run the backup script \
+    & {{scripts_dir}}/Invoke-Backup.ps1 -SystemType '{{system_name}}' -BackupPath '{{backup_dir}}/{{system_name}}' -Verbose; \
+    \
+    # Create a snapshot of current network connections using network_eval.ps1 \
+    Write-Host 'Capturing current network connections snapshot...' -ForegroundColor Yellow; \
+    $ConnectionFile = '{{log_dir}}/connections-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt'; \
+    '==== NETWORK CONNECTIONS SNAPSHOT ====' | Out-File -FilePath $ConnectionFile; \
+    'Date: ' + (Get-Date) | Out-File -FilePath $ConnectionFile -Append; \
+    'System: ' + $env:COMPUTERNAME | Out-File -FilePath $ConnectionFile -Append; \
+    '' | Out-File -FilePath $ConnectionFile -Append; \
+    \
+    # Use network_eval.ps1 to capture detailed network information \
+    & {{scripts_dir}}/network_eval.ps1 -OutputFile $ConnectionFile; \
+    \
+    Write-Host 'Backup complete. See {{log_dir}}/backup.log for details.' -ForegroundColor Green; \
+    Write-Host ('Network connection snapshot saved to ' + $ConnectionFile) -ForegroundColor Green;"
+
+# Check active network connections
+# 
+# Examines current network connections at the specified detail level.
+# Useful for quick network audits or troubleshooting.
+# 
+# Options:
+#   level - Detail level of network analysis (default: "basic")
+#           "basic" shows just listening ports, "detailed" runs full analysis
+# 
+# Usage:
+#   just network-eval           # Basic network connection check
+#   just network-eval detailed  # Detailed network connection analysis
+network-eval level="basic":
+    powershell -Command "Write-Host 'Checking {{level}} network connections...' -ForegroundColor Green; \
+    if ('{{level}}' -eq 'basic') { \
+        & {{scripts_dir}}/network_eval.ps1 -DetailLevel Basic; \
+    } else { \
+        & {{scripts_dir}}/network_eval.ps1 -DetailLevel Detailed; \
+    }"
+
+# Install or update security tools
+# 
+# Installs required security tools using the Install-Tools.ps1 script.
+# 
+# Options:
+#   install_dir - Directory where tools will be installed (default: "C:\SecurityTools")
+#   source_dir  - Source directory containing tool files (optional)
+# 
+# Usage: 
+#   just install-tools                                   # Install to default directory
+#   just install-tools "D:\Tools"                        # Install to custom directory
+#   just install-tools "C:\SecurityTools" ".\tools"      # Install from local source
+install-tools install_dir="C:\\SecurityTools" source_dir="":
+    powershell -Command "$Params = @{ \
+        InstallDir = '{{install_dir}}' \
+    }; \
+    \
+    if ('{{source_dir}}' -ne '') { \
+        $Params.Add('SourceDir', '{{source_dir}}'); \
+    } \
+    \
+    Write-Host 'Installing security tools to {{install_dir}}...' -ForegroundColor Green; \
+    & {{scripts_dir}}/Install-Tools.ps1 @Params;"
+
+# Rotate Active Directory passwords
+# 
+# Checks if the machine is a domain controller and then rotates AD user passwords
+# The passwords are saved to a CSV file for reference
+# 
+# Options:
+#   output_file - Path to save the password CSV file (default: "C:\KeyboardKowboys\passwords.csv")
+# 
+# Usage: just rotate-passwords
+# Usage: just rotate-passwords "D:\Secure\new_passwords.csv"
+rotate-passwords output_file="{{base_dir}}/passwords.csv":
+    powershell -Command "$ntdsRegPath = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NTDS\\Parameters'; \
+    if (Test-Path $ntdsRegPath) { \
+        Write-Host 'This machine is a Domain Controller' -ForegroundColor Green; \
+        Write-Host 'Starting password rotation process...' -ForegroundColor Cyan; \
+        & {{scripts_dir}}/Invoke-Passwords.ps1 -OutputFile '{{output_file}}'; \
+    } else { \
+        Write-Host 'This machine is NOT a Domain Controller' -ForegroundColor Red; \
+        Write-Host 'Password rotation can only be performed on a Domain Controller.' -ForegroundColor Yellow; \
+        exit 1; \
+    }"
+
+# Display system status dashboard
+# 
+# Shows a quick overview of the current system state.
+# Displays uptime, running services, network connections, and recent logon attempts.
+# 
+# Usage: just status
+status:
+    powershell -Command "Write-Host '=== keyboard kowboys system status ===' -ForegroundColor Cyan; \
+    Write-Host ('Time: ' + (Get-Date)) -ForegroundColor Yellow; \
+    $OS = Get-WmiObject -Class Win32_OperatingSystem; \
+    $Uptime = (Get-Date) - $OS.ConvertToDateTime($OS.LastBootUpTime); \
+    Write-Host ('Uptime: ' + $Uptime.Days + ' days, ' + $Uptime.Hours + ' hours, ' + $Uptime.Minutes + ' minutes') -ForegroundColor Yellow; \
+    \
+    Write-Host '---' -ForegroundColor Cyan; \
+    Write-Host 'Services:' -ForegroundColor Green; \
+    Get-Service | Where-Object {$_.Status -eq 'Running'} | Select-Object -First 10 | Format-Table -AutoSize; \
+    \
+    Write-Host '---' -ForegroundColor Cyan; \
+    Write-Host 'Connections:' -ForegroundColor Green; \
+    Get-NetTCPConnection -State Listen | Select-Object -First 10 | Format-Table -AutoSize; \
+    \
+    Write-Host '---' -ForegroundColor Cyan; \
+    Write-Host 'Recent logon attempts:' -ForegroundColor Green; \
+    try { \
+        Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 5 | \
+        Select-Object TimeCreated, @{N='User';E={$_.Properties[5].Value}}, @{N='Source';E={$_.Properties[13].Value}} | \
+        Format-Table -AutoSize; \
+    } catch { \
+        Write-Host 'No recent failed logon attempts or unable to access security log.' -ForegroundColor Yellow; \
+    }"
