@@ -1,6 +1,8 @@
 base_dir := "/opt/keyboard_kowboys"
 scripts_dir := base_dir + "/scripts"
 ops_dir := base_dir + "/ops"
+playbooks_dir := base_dir + "/playbooks"
+single-node_dir := base_dir + "/single-node"
 backup_dir := base_dir + "/backups"
 tools_dir := base_dir + "/tools"
 config_dir := base_dir + "/configs"
@@ -491,6 +493,92 @@ find-pii:
     fi
     
     {{scripts_dir}}/find_pii.sh
+
+# Usage: just remote all|hostname|ip
+remote action="help" target="all":
+    #!/bin/sh
+
+    # If the action is "help", show the available options
+    if [ "{{action}}" = "help" ]; then
+        just default
+        exit 0
+    elif [ "{{action}}" = "install" ]; then
+        if [ "{{target}}" = "all" ]; then
+            ansible-playbook -i {{base_dir}}/hosts.ini {{playbooks_dir}}/just_install.yml --ask-vault-pass
+            exit 0
+        else
+            ansible-playbook -i {{base_dir}}/hosts.ini --limit {{target}} {{playbooks_dir}}/just_install.yml --ask-vault-pass
+            exit 0
+        fi
+    fi
+
+    echo "running remote command on {{target}}"
+    {{scripts_dir}}/remote.sh {{action}} {{target}}
+
+# Usage: just install-wazuh
+install-wazuh:
+    #!/bin/sh
+
+    # Checks if dependencies are present in the parent directory
+    if [ ! -d "{{single-node_dir}}" ]; then
+        echo "Directory '{{single-node_dir}}' not found. Pulling from GitHub..."
+        wget --no-check-certificate -O wazuh-server.zip https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/wazuh-server.zip
+        echo "Unzipping Wazuh server deps files..."
+        unzip -o wazuh-server.zip -d {{base_dir}}
+        exit 0
+    fi
+
+    echo "Wazuh server dependencies found. Proceeding with installation..."
+    echo
+    echo "Adjusting script permissions..."
+    chmod +x {{single-node_dir}}/wazuh_server_install.sh
+
+    echo "Installing Wazuh server..."
+    {{single-node_dir}}/wazuh_server_install.sh
+
+#  Usage: just show (hosts)
+show target="hosts":
+    #!/bin/sh
+    echo "=== Keyboard Kowboys show {{target}} ==="
+    if [ "{{target}}" = "hosts" ]; then
+        {{scripts_dir}}/show_hosts.sh
+    else
+        echo "Unknown target: {{target}}"
+    fi
+
+# Usage: just add-agent (server_ip)
+add-agent server_ip="":
+    #!/bin/sh
+    echo "=== Keyboard Kowboys add-agent ==="
+    if [ -z "{{server_ip}}" ]; then
+        echo "Usage: just add-agent <server_ip>"
+        exit 1
+    fi
+
+    is_ip_valid=false
+
+    # Store the hosts in a temporary variable
+    host_list=$(just show hosts | grep : | awk '{print $3}')
+    
+    # Check if the server IP is valid
+    for ip in $host_list; do
+        if [ "$ip" = "{{server_ip}}" ]; then
+            echo "Server IP {{server_ip}} is valid."
+            is_ip_valid=true
+            break
+        fi
+    done
+
+    echo is_ip_valid=$is_ip_valid
+    
+    # Only proceed if the IP is valid
+    if [ "$is_ip_valid" = "true" ]; then
+        {{scripts_dir}}/wazuh_agent_install.sh {{server_ip}}
+    else
+        echo "Error: Invalid server IP {{server_ip}}"
+        echo "Refer to the list of hosts using 'just show hosts'"
+        exit 1
+    fi
 
 # Display system status dashboard
 # 

@@ -1,0 +1,68 @@
+---
+- name: Deploy and run script on remote hosts
+  hosts: all
+  gather_facts: no
+  pre_tasks:
+    - name: Apply Linux host-specific variables
+      set_fact:
+        ansible_ssh_pass: "{{ lookup('vars', 'host_vars')[inventory_hostname]['ansible_ssh_pass'] | default('fasdf!') }}"
+      when: inventory_hostname in groups['linux']
+        
+    - name: Apply Windows host-specific variables
+      set_fact:
+        ansible_ssh_pass: "{{ lookup('vars', 'host_vars')[inventory_hostname]['ansible_ssh_pass'] | default('DefaultWindowsPassword') }}"
+      when: inventory_hostname in groups['windows']
+
+  tasks:
+    # Linux hosts
+    - name: Create destination directory on Linux hosts
+      file:
+        path: /opt/keyboard_kowboys/
+        state: directory
+        mode: '0755'
+      when: inventory_hostname in groups['linux']
+
+    - name: Download script on Linux hosts
+      shell: wget --no-check-certificate -O setup-just.sh https://raw.githubusercontent.com/CSUSB-CISO/csusb-ccdc/refs/heads/main/just-linux/scripts/setup-just.sh
+      args:
+        chdir: /opt/keyboard_kowboys/
+      when: inventory_hostname in groups['linux']
+      register: linux_download_result
+
+    - name: Run script on Linux hosts
+      shell: bash setup-just.sh
+      args:
+        chdir: /opt/keyboard_kowboys/
+      when: inventory_hostname in groups['linux'] and linux_download_result is succeeded
+      register: linux_script_result
+        
+    - name: Display Linux script results
+      debug:
+        msg: "Script output on {{ inventory_hostname }}:\n{{ linux_script_result.stdout }}"
+      when: linux_script_result is defined and linux_script_result.stdout is defined
+
+    # Windows hosts
+    - name: Create destination directory on Windows hosts
+      win_file:
+        path: C:\KeyboardKowboys
+        state: directory
+      when: inventory_hostname in groups['windows']
+
+    - name: Download script on Windows hosts
+      win_shell: Invoke-WebRequest https://raw.githubusercontent.com/CSUSB-CISO/csusb-ccdc/refs/heads/main/just-windows/scripts/Setup-Just.ps1 -OutFile Setup-Just.ps1
+      args:
+        chdir: C:\KeyboardKowboys
+      when: inventory_hostname in groups['windows']
+      register: windows_download_result
+
+    - name: Run script on Windows hosts
+      win_shell: .\Setup-Just.ps1
+      args:
+        chdir: C:\KeyboardKowboys
+      when: inventory_hostname in groups['windows'] and windows_download_result is succeeded
+      register: windows_script_result
+        
+    - name: Display Windows script results
+      debug:
+        msg: "Script output on {{ inventory_hostname }}:\n{{ windows_script_result.stdout }}"
+      when: windows_script_result is defined and windows_script_result.stdout is defined
