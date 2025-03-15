@@ -1,6 +1,4 @@
 #!/bin/sh
-# Improved BusyBox-Compatible Keyboard Kowboys Setup Script
-# Sets up the directory structure and extracts zip content
 
 set -e  # Exit on any error
 
@@ -37,56 +35,90 @@ get_architecture() {
     esac
 }
 
+# Create the base directory first (before BusyBox installation)
+echo "Creating base directory: $BASE_DIR"
+mkdir -p "$BASE_DIR"
+
+# Create necessary subdirectories 
+echo "Creating required subdirectories..."
+mkdir -p "$BASE_DIR/scripts" "$BASE_DIR/ops" "$BASE_DIR/backups" "$BASE_DIR/tools" "$BASE_DIR/configs" "$BASE_DIR/logs"
+
 # Check if BusyBox is available, install it if needed
+BUSYBOX_CMD=""
 if ! command -v busybox > /dev/null 2>&1; then
     echo "BusyBox is not installed. Installing static BusyBox..."
     
+    # Create tools directory if it doesn't exist
+    TOOLS_DIR="$BASE_DIR/tools"
+    mkdir -p "$TOOLS_DIR"
+    
+    # Path for the BusyBox binary
+    BUSYBOX_PATH="$TOOLS_DIR/busybox"
+    
     # Check if wget or curl is available for downloading
     if command -v wget > /dev/null 2>&1; then
-        DL_CMD="wget --no-check-certificate -q"
+        echo "Using wget to download BusyBox..."
+        wget --no-check-certificate -q "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox" -O "$BUSYBOX_PATH"
+        DOWNLOAD_SUCCESS=$?
     elif command -v curl > /dev/null 2>&1; then
-        DL_CMD="curl -k -L -o busybox"
+        echo "Using curl to download BusyBox..."
+        curl -k -L -o "$BUSYBOX_PATH" "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox" 
+        DOWNLOAD_SUCCESS=$?
     else
         echo "Error: Neither wget nor curl is available. Cannot download BusyBox."
-        exit 1
+        DOWNLOAD_SUCCESS=1
     fi
     
-    # Create a temporary directory
-    TEMP_DIR=$(mktemp -d)
-    BUSYBOX_BINARY="$TEMP_DIR/busybox"
-    
-    echo "Downloading static BusyBox..."
-    if command -v wget > /dev/null 2>&1; then
-        wget --no-check-certificate -q "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox" -O "$BUSYBOX_BINARY"
-    else
-        curl -k -L -o "$BUSYBOX_BINARY" "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox"
-    fi
-    
-    if [ $? -ne 0 ]; then
+    if [ $DOWNLOAD_SUCCESS -ne 0 ]; then
         echo "Error: Failed to download BusyBox."
-        rm -rf "$TEMP_DIR"
         exit 1
     fi
     
     # Make the binary executable
-    chmod +x "$BUSYBOX_BINARY"
+    chmod +x "$BUSYBOX_PATH"
+    echo "BusyBox installed to $BUSYBOX_PATH"
     
-    # Install BusyBox to local directory
-    cp "$BUSYBOX_BINARY" ./busybox
-    chmod +x ./busybox
-    echo "BusyBox installed to $(pwd)/busybox"
-    
-    # Set BUSYBOX_CMD to use our local copy
-    BUSYBOX_CMD="./busybox"
-    
-    # Clean up temp directory
-    rm -rf "$TEMP_DIR"
+    # Try to create symlink in a PATH directory if possible
+    if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+        ln -sf "$BUSYBOX_PATH" "/usr/local/bin/busybox"
+        echo "Created symlink at /usr/local/bin/busybox"
+        BUSYBOX_CMD="/usr/local/bin/busybox"
+    elif [ -d "/usr/bin" ] && [ -w "/usr/bin" ]; then
+        ln -sf "$BUSYBOX_PATH" "/usr/bin/busybox"
+        echo "Created symlink at /usr/bin/busybox"
+        BUSYBOX_CMD="/usr/bin/busybox"
+    elif [ -d "/bin" ] && [ -w "/bin" ]; then
+        ln -sf "$BUSYBOX_PATH" "/bin/busybox"
+        echo "Created symlink at /bin/busybox"
+        BUSYBOX_CMD="/bin/busybox"
+    else
+        echo "Could not create symlink in PATH. Using full path to BusyBox."
+        BUSYBOX_CMD="$BUSYBOX_PATH"
+    fi
 else
     BUSYBOX_CMD="busybox"
     echo "BusyBox is already installed."
 fi
 
+# Include BusyBox directory in PATH for this session
+if [ -n "$BUSYBOX_CMD" ]; then
+    echo "Adding BusyBox to PATH..."
+    export PATH="$PATH:$(dirname "$BUSYBOX_CMD")"
+fi
+
+# Check if BusyBox unzip works and install it if not
+if [ -n "$BUSYBOX_CMD" ]; then
+    if ! $BUSYBOX_CMD unzip -h >/dev/null 2>&1; then
+        echo "Configuring BusyBox unzip applet..."
+        # Create a symlink for unzip in the same directory as busybox
+        BUSYBOX_DIR=$(dirname "$BUSYBOX_CMD")
+        ln -sf "$BUSYBOX_CMD" "$BUSYBOX_DIR/unzip"
+        echo "Created unzip symlink at $BUSYBOX_DIR/unzip"
+    fi
+fi
+
 # Check if curl is available, install it if needed
+CURL_CMD=""
 if ! command -v curl > /dev/null 2>&1; then
     echo "curl is not installed. Installing..."
     
@@ -128,28 +160,21 @@ if ! command -v curl > /dev/null 2>&1; then
     # Make the binary executable
     chmod +x "$CURL_BINARY"
     
-    # In busybox environments, keep curl in current directory
-    cp "$CURL_BINARY" ./curl
-    chmod +x ./curl
-    echo "curl installed to $(pwd)/curl"
+    # Install curl to tools directory
+    CURL_PATH="$BASE_DIR/tools/curl"
+    cp "$CURL_BINARY" "$CURL_PATH"
+    chmod +x "$CURL_PATH"
+    echo "curl installed to $CURL_PATH"
     
     # Clean up temp directory
     rm -rf "$TEMP_DIR"
     
-    # Use the local curl
-    CURL_CMD="./curl"
+    # Use the installed curl
+    CURL_CMD="$CURL_PATH"
 else
     CURL_CMD="curl"
     echo "curl is already installed."
 fi
-
-# Create the base directory
-echo "Creating base directory: $BASE_DIR"
-mkdir -p "$BASE_DIR"
-
-# Create necessary subdirectories 
-echo "Creating required subdirectories..."
-mkdir -p "$BASE_DIR/scripts" "$BASE_DIR/ops" "$BASE_DIR/backups" "$BASE_DIR/tools" "$BASE_DIR/configs" "$BASE_DIR/logs"
 
 # Create temporary directory for downloading files
 TMP_DIR=$(mktemp -d)
@@ -159,8 +184,14 @@ cd "$TMP_DIR"
 echo "Downloading Keyboard Kowboys files..."
 if command -v wget > /dev/null 2>&1; then
     wget --no-check-certificate -q "https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/just-lin.zip" -O just-lin.zip
-else
+elif [ -n "$BUSYBOX_CMD" ]; then
+    $BUSYBOX_CMD wget --no-check-certificate -q "https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/just-lin.zip" -O just-lin.zip
+elif [ -n "$CURL_CMD" ]; then
     $CURL_CMD -k -L -o just-lin.zip "https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/just-lin.zip"
+else
+    echo "Error: No method available to download files."
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
 
 # Check if download was successful
@@ -175,19 +206,25 @@ echo "Examining zip contents using BusyBox unzip..."
 mkdir -p extract_temp
 
 # Use our installed BusyBox or system BusyBox for unzip
-echo "Using BusyBox unzip..."
-$BUSYBOX_CMD unzip -o just-lin.zip -d extract_temp
-
-# If BusyBox unzip fails, try system unzip as fallback
-if [ $? -ne 0 ]; then
-    echo "BusyBox unzip failed, trying system unzip if available..."
+if [ -n "$BUSYBOX_CMD" ]; then
+    echo "Using BusyBox unzip..."
+    $BUSYBOX_CMD unzip -o just-lin.zip -d extract_temp
+    UNZIP_SUCCESS=$?
+else
+    echo "BusyBox not available, trying system unzip..."
     if command -v unzip > /dev/null 2>&1; then
         unzip -o just-lin.zip -d extract_temp
+        UNZIP_SUCCESS=$?
     else
-        echo "Error: Failed to extract zip file. No working unzip command available."
-        rm -rf "$TMP_DIR"
-        exit 1
+        echo "Error: No unzip command available."
+        UNZIP_SUCCESS=1
     fi
+fi
+
+if [ $UNZIP_SUCCESS -ne 0 ]; then
+    echo "Error: Failed to extract zip file."
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
 
 # List extracted contents
@@ -258,8 +295,14 @@ if ! command -v just &> /dev/null; then
         echo "Downloading just $JUST_VERSION for $JUST_ARCH..."
         if command -v wget > /dev/null 2>&1; then
             wget --no-check-certificate -q "$JUST_URL" -O "$JUST_DIR/just.tar.gz"
-        else
+        elif [ -n "$BUSYBOX_CMD" ]; then
+            $BUSYBOX_CMD wget --no-check-certificate -q "$JUST_URL" -O "$JUST_DIR/just.tar.gz"
+        elif [ -n "$CURL_CMD" ]; then
             $CURL_CMD -k -L -o "$JUST_DIR/just.tar.gz" "$JUST_URL"
+        else
+            echo "Error: No method available to download files."
+            rm -rf "$JUST_DIR"
+            exit 1
         fi
         
         if [ $? -ne 0 ]; then
@@ -358,12 +401,23 @@ fi
 # Clean up
 rm -rf "$TMP_DIR"
 
+# Display BusyBox information at the end
+echo "BusyBox information:"
+if [ -n "$BUSYBOX_CMD" ]; then
+    echo "  Path: $BUSYBOX_CMD"
+    echo "  Installed at: $(which $BUSYBOX_CMD 2>/dev/null || echo "$BUSYBOX_CMD")"
+    echo "  Version: $($BUSYBOX_CMD | head -n 1 2>/dev/null || echo "Unknown")"
+else
+    echo "  Not installed or not found"
+fi
+echo ""
+
 echo "==========================================================="
 echo "Keyboard Kowboys environment has been set up successfully!"
 echo "Base directory: $BASE_DIR"
 echo ""
 if [ -x "$BIN_DIR/just" ]; then
-    echo "just command installed 
+    echo "just command installed at: $BIN_DIR/just"
     echo ""
     if [ "$BIN_DIR" = "/tmp" ]; then
         echo "Since just is installed in /tmp, you can run it using:"
