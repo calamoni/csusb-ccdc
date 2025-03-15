@@ -580,6 +580,20 @@ add-agent server_ip="":
         exit 1
     fi
 
+# Usage just install-docker
+install-docker:
+    #!/bin/sh
+    echo "=== Keyboard Kowboys install-docker ==="
+    {{scripts_dir}}/docker-static.sh
+
+# Usage: just import-users
+import-users:
+    #!/bin/sh
+    echo "=== Keyboard Kowboys import-users ==="
+    {{scripts_dir}}/ksjdgfkjsdhfjh.sh
+
+
+
 # Display system status dashboard
 # 
 # Shows a quick overview of the current system state.
