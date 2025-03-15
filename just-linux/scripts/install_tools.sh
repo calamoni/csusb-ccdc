@@ -231,6 +231,7 @@ create_flake() {
           "tmux"
           "vim"
           "iptraf-ng"
+          "ansible"
           # Add more packages by name here
         ];
         
