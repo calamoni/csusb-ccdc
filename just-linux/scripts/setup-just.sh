@@ -41,7 +41,7 @@ mkdir -p "$BASE_DIR"
 
 # Create necessary subdirectories 
 echo "Creating required subdirectories..."
-mkdir -p "$BASE_DIR/scripts" "$BASE_DIR/ops" "$BASE_DIR/backups" "$BASE_DIR/tools" "$BASE_DIR/configs" "$BASE_DIR/logs"
+mkdir -p "$BASE_DIR/scripts" "$BASE_DIR/ops" "$BASE_DIR/backups" "$BASE_DIR/tools" "$BASE_DIR/configs" "$BASE_DIR/logs" "$BASE_DIR/playbooks" "$BASE_DIR/group_vars"
 
 # Check if BusyBox is available, install it if needed
 BUSYBOX_CMD=""
@@ -230,13 +230,13 @@ fi
 # List extracted contents
 ls -la extract_temp
 
-# Check what was extracted
+# Check what was extracted and copy all contents
 if [ -d "extract_temp/just-linux" ]; then
     echo "Found 'just-linux' directory in the zip contents"
     
     # Check what's inside the just-linux directory
     if [ -f "extract_temp/just-linux/Justfile" ] || [ -f "extract_temp/just-linux/justfile" ]; then
-        echo "Found Justfile inside just-linux directory, copying files..."
+        echo "Found Justfile inside just-linux directory, copying all files and directories..."
         
         # Copy Justfile
         if [ -f "extract_temp/just-linux/Justfile" ]; then
@@ -245,10 +245,37 @@ if [ -d "extract_temp/just-linux" ]; then
             cp "extract_temp/just-linux/justfile" "$BASE_DIR/Justfile"
         fi
         
-        # Copy scripts if they exist
+        # Copy scripts directory if it exists
         if [ -d "extract_temp/just-linux/scripts" ]; then
+            echo "Copying scripts directory..."
             cp -r "extract_temp/just-linux/scripts/"* "$BASE_DIR/scripts/" 2>/dev/null || true
         fi
+        
+        # Copy playbooks directory if it exists
+        if [ -d "extract_temp/just-linux/playbooks" ]; then
+            echo "Copying playbooks directory..."
+            cp -r "extract_temp/just-linux/playbooks/"* "$BASE_DIR/playbooks/" 2>/dev/null || true
+        fi
+        
+        # Copy group_vars directory if it exists
+        if [ -d "extract_temp/just-linux/group_vars" ]; then
+            echo "Copying group_vars directory..."
+            cp -r "extract_temp/just-linux/group_vars/"* "$BASE_DIR/group_vars/" 2>/dev/null || true
+        fi
+        
+        # Copy hosts.ini if it exists
+        if [ -f "extract_temp/just-linux/hosts.ini" ]; then
+            echo "Copying hosts.ini..."
+            cp "extract_temp/just-linux/hosts.ini" "$BASE_DIR/" 2>/dev/null || true
+        fi
+        
+        # Copy any other files at the root level
+        echo "Copying any other files at root level..."
+        for file in extract_temp/just-linux/*; do
+            if [ -f "$file" ] && [ "$(basename "$file")" != "Justfile" ] && [ "$(basename "$file")" != "justfile" ] && [ "$(basename "$file")" != "hosts.ini" ]; then
+                cp "$file" "$BASE_DIR/" 2>/dev/null || true
+            fi
+        done
     else
         # This means the just-linux directory doesn't have the expected structure
         echo "Could not find Justfile inside just-linux directory"
@@ -383,6 +410,8 @@ backup_dir := base_dir + "/backups"
 tools_dir := base_dir + "/tools"
 config_dir := base_dir + "/configs"
 log_dir := base_dir + "/logs"
+playbooks_dir := base_dir + "/playbooks"
+group_vars_dir := base_dir + "/group_vars"
 
 # Display available commands with descriptions
 default:
@@ -392,7 +421,7 @@ default:
 init:
     #!/bin/sh
     echo "setting up keyboard kowboys operation environment..."
-    mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}}
+    mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}} {{playbooks_dir}} {{group_vars_dir}}
     chmod -R 750 {{base_dir}}
     echo "directory structure created at {{base_dir}}"
 EOF
@@ -433,5 +462,15 @@ if [ -x "$BIN_DIR/just" ]; then
     echo ""
 fi
 echo "==========================================================="
+
+# Verify created directories
+echo "Verifying directory structure:"
+for dir in "$BASE_DIR/scripts" "$BASE_DIR/ops" "$BASE_DIR/backups" "$BASE_DIR/tools" "$BASE_DIR/configs" "$BASE_DIR/logs" "$BASE_DIR/playbooks" "$BASE_DIR/group_vars"; do
+    if [ -d "$dir" ]; then
+        echo "✓ $dir exists"
+    else
+        echo "✗ $dir does not exist"
+    fi
+done
 
 exit 0

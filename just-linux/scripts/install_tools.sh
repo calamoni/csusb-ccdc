@@ -223,6 +223,10 @@ create_flake() {
         packageNames = [
           "git"
           "nmap"
+          "bash"
+          "openssh"
+          "sshpass"
+          "fail2ban"
           "fd"
           "ripgrep"
           "lynis"
