@@ -71,6 +71,23 @@ help recipe="":
             Write-Host 'EXAMPLES:' -ForegroundColor Green
             Write-Host '  just network-eval           # Basic network connection check'
             Write-Host '  just network-eval detailed  # Detailed network connection analysis'
+        } elseif ('{{recipe}}' -eq 'harden') {
+            Write-Host 'USAGE: just harden' -ForegroundColor Yellow
+            Write-Host ''
+            Write-Host 'DESCRIPTION:' -ForegroundColor Green
+            Write-Host 'Runs the Invoke-EzScript.ps1 to perform comprehensive system hardening.'
+            Write-Host 'This script applies security baseline configurations including:'
+            Write-Host '  - Audit policy configuration'
+            Write-Host '  - SMB protocol security settings'
+            Write-Host '  - Group policy security settings'
+            Write-Host '  - Kerberos and Zerologon mitigations'
+            Write-Host '  - Windows Defender optimization'
+            Write-Host '  - Firewall rules configuration'
+            Write-Host '  - Registry security hardening'
+            Write-Host '  - Local account security'
+            Write-Host ''
+            Write-Host 'EXAMPLES:' -ForegroundColor Green
+            Write-Host '  just harden  # Run the full hardening script'
         } else {
             Write-Host 'USAGE: just {{recipe}}' -ForegroundColor Yellow
             Write-Host ''
@@ -101,11 +118,82 @@ init:
     Set-Acl -Path '{{base_dir}}' -AclObject $Acl
     Write-Host 'Directory structure created at {{base_dir}}' -ForegroundColor Green
 
-# Run baseline hardening
+# Run comprehensive system hardening
 harden:
     #!{{shebang}}
-    Write-Host 'Running baseline security hardening...' -ForegroundColor Green
-    Write-Host 'Note: This requires a hardening script which is not currently available.' -ForegroundColor Yellow
+    Write-Host '===== Keyboard Kowboys Security Hardening =====' -ForegroundColor Cyan
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $logFile = '{{log_dir}}/hardening_' + $timestamp + '.log'
+    $ezScriptDir = "C:\Program Files\ezScript"
+    
+    # Set environment variables for the script
+    $env:KK_BASE_DIR = '{{base_dir}}'
+    $env:KK_CONFIG_DIR = '{{config_dir}}'
+    $env:KK_LOG_DIR = '{{log_dir}}'
+    
+    Write-Host 'Starting comprehensive hardening process. This may take several minutes...' -ForegroundColor Yellow
+    Write-Host ('Log will be saved to: ' + $logFile) -ForegroundColor Yellow
+    
+    # Create ezScript directory if it doesn't exist
+    if (-not (Test-Path $ezScriptDir)) {
+        Write-Host "Creating ezScript directory..." -ForegroundColor Yellow
+        New-Item -Path $ezScriptDir -ItemType Directory -Force | Out-Null
+    }
+    
+    # Check if OS is Windows
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        # Check administrator privileges
+        $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin) {
+            Write-Host 'Error: This script requires administrator privileges.' -ForegroundColor Red
+            Write-Host 'Please run the command with elevated privileges and try again.' -ForegroundColor Yellow
+            exit 1
+        }
+        
+        Write-Host 'Executing EzScript hardening process...' -ForegroundColor Green
+        
+        # Run the hardening script and capture output
+        & {{scripts_dir}}/Invoke-EzScript.ps1 -LogFile $logFile -Verbose *>&1 | 
+            Tee-Object -FilePath $logFile -Append |
+            ForEach-Object { 
+                if ($_ -match 'ERROR|FAIL|CRITICAL') {
+                    Write-Host $_ -ForegroundColor Red
+                } elseif ($_ -match 'WARNING') {
+                    Write-Host $_ -ForegroundColor Yellow
+                } elseif ($_ -match 'SUCCESS|COMPLETED') {
+                    Write-Host $_ -ForegroundColor Green
+                } else {
+                    Write-Host $_
+                }
+            }
+            
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "`nHardening completed successfully!" -ForegroundColor Green
+            Write-Host "The following security measures have been applied:" -ForegroundColor Green
+            Write-Host "✓ Audit policies configured" -ForegroundColor Green
+            Write-Host "✓ SMB security settings applied" -ForegroundColor Green
+            Write-Host "✓ Group policies hardened" -ForegroundColor Green
+            Write-Host "✓ Windows Defender optimized" -ForegroundColor Green
+            Write-Host "✓ Firewall rules configured" -ForegroundColor Green
+            Write-Host "✓ Registry security settings applied" -ForegroundColor Green
+            Write-Host "✓ Local account security enforced" -ForegroundColor Green
+        } else {
+            Write-Host "`nHardening process completed with errors." -ForegroundColor Red
+            Write-Host "Please review the log file for details: $logFile" -ForegroundColor Red
+        }
+    } else {
+        Write-Host 'This hardening script is designed for Windows systems only.' -ForegroundColor Red
+        exit 1
+    }
+    
+    # Display location of logs and security files
+    Write-Host "`nSecurity logs and configuration files:" -ForegroundColor Cyan
+    Write-Host "- Detailed log: $logFile" -ForegroundColor Yellow
+    Write-Host "- Security settings: C:\Program Files\SecurityConfig\" -ForegroundColor Yellow
+    Write-Host "- EzScript working directory: $ezScriptDir" -ForegroundColor Yellow
+    
+    Write-Host "`nTo view the detailed log, run:" -ForegroundColor Cyan
+    Write-Host "notepad $logFile" -ForegroundColor Yellow
 
 # Back up critical system files
 backup system_name="all":
