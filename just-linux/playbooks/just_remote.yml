@@ -1,0 +1,38 @@
+---
+- name: Run command on remote hosts
+  hosts: all
+  gather_facts: no
+  pre_tasks:
+    - name: Apply Linux host-specific variables
+      set_fact:
+        ansible_ssh_pass: "{{ lookup('vars', 'host_vars')[inventory_hostname]['ansible_ssh_pass'] | default('fasdf!') }}"
+      when: inventory_hostname in groups['linux']
+        
+    - name: Apply Windows host-specific variables
+      set_fact:
+        ansible_ssh_pass: "{{ lookup('vars', 'host_vars')[inventory_hostname]['ansible_ssh_pass'] | default('DefaultWindowsPassword') }}"
+      when: inventory_hostname in groups['windows']
+  tasks:
+    - name: Just Set Up Remote Linux
+      shell: "{{ remote_command | default('echo \"No command provided\"') }}"
+      args:
+        chdir: /opt/keyboard_kowboys/
+      when: inventory_hostname in groups['linux'] and remote_command is defined
+      register: linux_command_result
+      
+    - name: Display Linux command results
+      debug:
+        msg: "Command output on {{ inventory_hostname }}:\n{{ linux_command_result.stdout }}"
+      when: linux_command_result is defined and linux_command_result.stdout is defined
+      
+    - name: Just Set Up Remote Windows
+      win_shell: "{{ remote_command | default('echo \"No command provided\"') }}"
+      args:
+        chdir: C:\KeyboardKowboys
+      when: inventory_hostname in groups['windows'] and remote_command is defined
+      register: windows_command_result
+      
+    - name: Display Windows command results
+      debug:
+        msg: "Command output on {{ inventory_hostname }}:\n{{ windows_command_result.stdout }}"
+      when: windows_command_result is defined and windows_command_result.stdout is defined
