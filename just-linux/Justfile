@@ -1,0 +1,449 @@
+base_dir := "/opt/keyboard_kowboys"
+scripts_dir := base_dir + "/scripts"
+ops_dir := base_dir + "/ops"
+backup_dir := base_dir + "/backups"
+tools_dir := base_dir + "/tools"
+config_dir := base_dir + "/configs"
+log_dir := base_dir + "/logs"
+
+# Display available commands with descriptions
+default:
+    @just --list
+
+# Display help for recipes and their options
+help recipe="":
+    #!/bin/sh
+    if [ -z "{{recipe}}" ]; then
+        echo "===== KEYBOARD KOWBOYS OPERATIONS HELP ====="
+        echo "Usage: just help <recipe>"
+        echo ""
+        echo "Available recipes:"
+        just --summary
+        echo ""
+        echo "For detailed help on a specific recipe, run: just help <recipe-name>"
+    else
+        echo "===== HELP: {{recipe}} ====="
+        
+        # Extract recipe definition to show all options
+        RECIPE_DEF=$(just --show {{recipe}} | grep -E "^{{recipe}}.*:$" | head -1)
+        if [ -n "$RECIPE_DEF" ]; then
+            echo "USAGE: just $RECIPE_DEF" | sed 's/://'
+        fi
+        
+        echo ""
+        echo "DESCRIPTION:"
+        just --show {{recipe}} | grep -E "^# " | sed 's/^# //' || echo "No help available for '{{recipe}}'"
+        
+        # Add specific option information for certain commands
+        case "{{recipe}}" in
+            "backup")
+                echo ""
+                echo "AVAILABLE BACKUP TYPES:"
+                echo "  all        - Backup all system configurations"
+                echo "  network    - Only network-related configurations (/etc/hosts, /etc/resolv.conf, etc.)"
+                echo "  firewall   - Firewall rules and configurations"
+                echo "  services   - Service definitions and configurations"
+                echo "  database   - Database configurations and schemas"
+                echo "  web        - Web server configurations"
+                echo "  custom     - Custom backup defined in config file"
+                echo ""
+                echo "ADVANCED OPTIONS (set in config file):"
+                echo "  Compression level:  1-9 (default: 9)"
+                echo "  Retention:          Days to keep backups (default: 30)"
+                echo "  Encryption:         Enable/disable (default: disabled)"
+                echo "  Remote backup:      Enable/disable (default: disabled)"
+                echo "  Backup method:      tar, rsync, duplicity (default: rsync)"
+                ;;
+            "diff")
+                echo ""
+                echo "AVAILABLE DIFF TARGETS:"
+                echo "  ports       - Compare listening network ports"
+                echo "  connections - Compare active network connections"
+                echo "  processes   - Compare running processes"
+                echo "  services    - Compare active services"
+                echo "  users       - Compare logged in users"
+                echo "  configs     - Compare configuration files"
+                echo "  packages    - Compare installed packages"
+                echo "  mounts      - Compare mounted filesystems"
+                echo "  files       - Compare specific files"
+                echo "  all         - Compare all of the above"
+                echo ""
+                echo "SYSTEM TYPES (same as backup types):"
+                echo "  all, network, firewall, services, database, web, custom"
+                echo ""
+                echo "DATE FORMAT:"
+                echo "  YYYYMMDD (e.g., 20250315 for March 15, 2025)"
+                ;;
+        esac
+        
+        echo ""
+        echo "EXAMPLES:"
+        case "{{recipe}}" in
+            "backup")
+                echo "  just backup              # Backup all systems"
+                echo "  just backup network      # Backup only network configs"
+                echo "  just backup database     # Backup database configs"
+                ;;
+            "diff")
+                echo "  just diff                # Compare config files with latest backup"
+                echo "  just diff ports          # Compare listening ports"
+                echo "  just diff processes all 20250315  # Compare processes with March 15th backup"
+                echo "  just diff services network        # Compare services using network backup"
+                ;;
+            "diff-files")
+                echo "  just diff-files \"/etc/hosts /etc/hostname\"  # Compare specific files"
+                ;;
+            *)
+                # Extract examples from the recipe documentation
+                EXAMPLES=$(just --show {{recipe}} | grep -A 10 "Usage:" | grep -v "Usage:")
+                if [ -n "$EXAMPLES" ]; then
+                    echo "$EXAMPLES"
+                else
+                    echo "  just {{recipe}}  # Run the {{recipe}} command"
+                fi
+                ;;
+        esac
+    fi
+
+# Initialize directory structure (run once or after reset)
+# 
+# Creates the basic directory structure for keyboard_kowboys operations.
+# This should be run after a fresh install or after a reset.
+# 
+# Usage: just init
+init:
+    #!/bin/sh
+    echo "setting up keyboard kowboys operation environment..."
+    sudo mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}}
+    sudo chmod -R 750 {{base_dir}}
+    echo "directory structure created at {{base_dir}}"
+
+# Run baseline hardening using chimera
+# 
+# Applies baseline security hardening measures using the chimera tool.
+# This strengthens the system against common attacks and vulnerabilities.
+# 
+# Usage: just harden
+harden:
+    cd {{ops_dir}} && ./chimera baseline
+
+# Back up critical system files
+# 
+# Creates a backup of system configurations based on the specified system name.
+# Uses rsync for incremental backups to improve speed and efficiency.
+# Also captures a snapshot of current network connections for quick reference.
+# 
+# Options:
+#   system_name - Type of system to back up (default: "all")
+#                 Valid options: all, network, firewall, services, database, web, custom
+#
+# Advanced options (can be set in config file):
+#   - Compression level (1-9)
+#   - Retention policy for old backups
+#   - Encryption of backups (requires GPG)
+#   - Remote backup destinations
+#   - File/directory exclusion patterns
+#   - Alternative backup methods (tar, rsync, duplicity)
+# 
+# Usage: 
+#   just backup              # Back up all configurations
+#   just backup network      # Back up only network configurations
+#   just backup firewall     # Back up only firewall settings
+#   just backup database     # Back up database configurations
+# Updated backup recipe with environment variables to make paths dynamic
+backup system_name="all":
+    #!/bin/sh
+    echo "backing up {{system_name}} configurations and system state..."
+    # Export all keyboard_kowboys environment variables
+    export KK_BASE_DIR="{{base_dir}}"
+    export KK_CONFIG_DIR="{{config_dir}}"
+    export KK_LOG_DIR="{{log_dir}}"
+    
+    # Run the backup script with the environment variables
+    sudo -E {{scripts_dir}}/backup.sh -v {{system_name}} {{backup_dir}}/{{system_name}}
+    
+    # Create a quick snapshot of current network connections in a separate file
+    # for easy access without needing to browse the full backup
+    echo "capturing current network connections snapshot..."
+    CONNECTION_FILE="{{log_dir}}/connections-$(date +%Y%m%d-%H%M%S).txt"
+    echo "==== NETWORK CONNECTIONS SNAPSHOT ====" > $CONNECTION_FILE
+    echo "Date: $(date)" >> $CONNECTION_FILE
+    echo "System: $(hostname)" >> $CONNECTION_FILE
+    echo "" >> $CONNECTION_FILE
+    
+    # Use available tool to capture connections
+    if command -v ss >/dev/null 2>&1; then
+        echo "== LISTENING PORTS ==" >> $CONNECTION_FILE
+        sudo ss -tuln >> $CONNECTION_FILE
+        echo "" >> $CONNECTION_FILE
+        echo "== ALL CONNECTIONS ==" >> $CONNECTION_FILE
+        sudo ss -tunapl >> $CONNECTION_FILE
+    elif command -v netstat >/dev/null 2>&1; then
+        echo "== LISTENING PORTS ==" >> $CONNECTION_FILE
+        sudo netstat -tuln >> $CONNECTION_FILE
+        echo "" >> $CONNECTION_FILE
+        echo "== ALL CONNECTIONS ==" >> $CONNECTION_FILE
+        sudo netstat -tunapl >> $CONNECTION_FILE
+    else
+        echo "Neither ss nor netstat available" >> $CONNECTION_FILE
+    fi
+    
+    echo "Backup complete. See {{log_dir}}/backup.log for details."
+    echo "Network connection snapshot saved to $CONNECTION_FILE"
+# Compare current system state against last backup
+# 
+# Compares the current system state with a previous backup to identify changes.
+# Useful for security monitoring and configuration drift detection.
+# 
+# Options:
+#   target      - What to compare (default: "configs")
+#                 Valid options: ports, connections, processes, services, users, 
+#                 configs, packages, mounts, files, all
+#   system_type - Which backup type to compare against (default: "all")
+#   date        - Specific backup date to use (default: latest)
+# 
+# Usage:
+#   just diff                     # Compare configuration files
+#   just diff ports network       # Compare network ports from network backup
+#   just diff processes all 20250315  # Compare processes with March 15th backup
+diff target="configs" system_type="all" date="":
+    #!/bin/sh
+    echo "Comparing current {{target}} with backup data..."
+    
+    # Make sure directories exist
+    mkdir -p {{backup_dir}}/{{system_type}}/latest/system_info || true
+    
+    # Make sure the script has execute permissions
+    chmod +x {{scripts_dir}}/diff.sh
+    
+    # Export environment variables
+    export KK_BASE_DIR="{{base_dir}}"
+    export KK_BACKUP_DIR="{{backup_dir}}"
+    export KK_LOG_DIR="{{log_dir}}" 
+    export KK_CONFIG_DIR="{{config_dir}}"
+    
+    # Build options with proper quoting
+    OPTS=""
+    if [ "{{system_type}}" != "all" ]; then
+        OPTS="$OPTS -s {{system_type}}"
+    fi
+    
+    if [ "{{date}}" != "" ]; then
+        OPTS="$OPTS -d {{date}}"
+    fi
+    
+    # Run command
+    sudo -E {{scripts_dir}}/diff.sh $OPTS {{target}}
+
+# Compare listening ports to detect new services
+# 
+# Checks for changes in listening network ports since the last backup.
+# Useful for detecting unauthorized services or changes to network configuration.
+# 
+# Usage: just diff-ports
+diff-ports:
+    @just diff ports
+
+# Compare processes to check for unexpected applications
+# 
+# Detects changes in running processes since the last backup.
+# Helps identify unauthorized or suspicious processes.
+# 
+# Usage: just diff-processes
+diff-processes:
+    @just diff processes
+
+# Compare network connections to check activity changes
+# 
+# Detects changes in network connections since the last backup.
+# Useful for identifying unusual network activity or potential data exfiltration.
+# 
+# Usage: just diff-connections
+diff-connections:
+    @just diff connections
+
+# Compare services to detect service changes
+# 
+# Identifies changes in running services since the last backup.
+# Helps detect unauthorized service modifications or additions.
+# 
+# Usage: just diff-services
+diff-services:
+    @just diff services
+
+# Check for new installed packages
+# 
+# Compares the currently installed packages with the last backup.
+# Useful for detecting unauthorized software installations.
+# 
+# Usage: just diff-packages
+diff-packages:
+    @just diff packages
+
+# Compare specific files with previous backup
+# 
+# Compares specified files with their versions in the previous backup.
+# Useful for tracking changes to important configuration files.
+# 
+# Options:
+#   files - Space-separated list of files to compare
+# 
+# Usage: just diff-files "/etc/hosts /etc/passwd"
+diff-files files:
+    @just diff files "-f \"{{files}}\""
+
+# Check active network connections
+# 
+# Examines current network connections at the specified detail level.
+# Useful for quick network audits or troubleshooting.
+# 
+# Options:
+#   level - Detail level of network analysis (default: "basic")
+#           "basic" shows just listening ports, "detailed" runs full analysis
+# 
+# Usage:
+#   just network-eval           # Basic network connection check
+#   just network-eval detailed  # Detailed network connection analysis
+network-eval level="basic":
+    #!/bin/sh
+    echo "checking {{level}} network connections..."
+    # Check if we're running on BusyBox
+    if busybox 2>/dev/null | grep -q "BusyBox"; then
+        echo "BusyBox detected, using busybox-compatible scripts..."
+        if [ "{{level}}" = "basic" ]; then
+            # BusyBox might not have ss, use netstat instead
+            busybox netstat -tuln
+        else
+            {{scripts_dir}}/network_eval_busybox.sh
+        fi
+    else
+        if [ "{{level}}" = "basic" ]; then
+            ss -tuln
+        else
+            {{scripts_dir}}/network_eval.sh
+        fi
+    fi
+
+# Deploy system monitoring
+# 
+# Sets up monitoring for the system using the configured monitoring solution.
+# 
+# Usage: just deploy-monitoring
+deploy-monitoring:
+    @{{scripts_dir}}/deploy_monitoring.sh
+
+# Verify service integrity
+# 
+# Checks the integrity of running services against expected configurations.
+# Helps detect service tampering or unauthorized modifications.
+# 
+# Options:
+#   critical_only - Whether to check only critical services (default: "true")
+#                   Set to "false" to check all services
+# 
+# Usage:
+#   just verify-services          # Verify only critical services
+#   just verify-services false    # Verify all services
+verify-services critical_only="true":
+    @{{scripts_dir}}/verify_services.sh {{critical_only}}
+
+# Run a quick system integrity check
+# 
+# Performs a quick check for potential system integrity issues.
+# Checks binary checksums and identifies new SUID binaries.
+# 
+# Usage: just integrity-quick
+integrity-quick:
+    #!/bin/sh
+    echo "running quick integrity checks..."
+    find /bin /sbin /usr/bin -type f -exec md5sum {} \; | grep -vf {{backup_dir}}/binaries.md5
+    echo "checking for new suid binaries..."
+    find / -perm -4000 2>/dev/null
+
+# Reset firewall to known-good state
+# 
+# Restores the firewall configuration to a known-good state.
+# Useful after suspected compromise or when troubleshooting network issues.
+# 
+# Usage: just reset-firewall
+reset-firewall:
+    @{{scripts_dir}}/reset_firewall.sh
+
+# Review and analyze system logs
+# 
+# Analyzes system logs for a specified time period to identify issues or attacks.
+# 
+# Options:
+#   hours - Number of hours of logs to analyze (default: 1)
+# 
+# Usage:
+#   just analyze-logs       # Analyze the last hour of logs
+#   just analyze-logs 24    # Analyze the last 24 hours of logs
+analyze-logs hours="1":
+    @{{scripts_dir}}/log_analyzer.sh {{hours}}
+
+# Create an incident response snapshot
+# 
+# Captures current system state for incident response purposes.
+# Useful when investigating potential security incidents.
+# 
+# Options:
+#   name - Name/identifier for the incident snapshot
+# 
+# Usage: just incident-snapshot suspicious_login
+incident-snapshot name:
+    #!/bin/sh
+    echo "creating incident snapshot: {{name}}"
+    mkdir -p {{backup_dir}}/incidents/{{name}}
+    ps aux > {{backup_dir}}/incidents/{{name}}/processes.txt
+    netstat -tulpn > {{backup_dir}}/incidents/{{name}}/connections.txt
+    lsof > {{backup_dir}}/incidents/{{name}}/open_files.txt
+    journalctl -n 500 > {{backup_dir}}/incidents/{{name}}/recent_logs.txt
+    echo "snapshot saved to {{backup_dir}}/incidents/{{name}}/"
+
+# Install or update security tools
+# 
+# Installs required security tools using Nix package manager.
+# Will install Nix first if it's not already available.
+# 
+# Usage: just install-tools
+install-tools:
+    #!/bin/sh
+    if ! command -v nix-env >/dev/null 2>&1; then
+        echo "Nix not found. Installing Nix first..."
+        {{scripts_dir}}/install_nix.sh
+    else
+        echo "Nix is already installed"
+    fi
+    echo "Installing/updating tools..."
+    {{scripts_dir}}/install_tools.sh
+
+# Scan for personally identifiable information
+# 
+# Searches the system for potentially exposed PII (Personal Identifiable Information).
+# Helps identify data privacy risks and compliance issues.
+# 
+# Usage: just find-pii
+find-pii:
+    {{scripts_dir}}/find_pii.sh
+
+# Display system status dashboard
+# 
+# Shows a quick overview of the current system state.
+# Displays uptime, running services, network connections, and recent auth attempts.
+# 
+# Usage: just status
+status:
+    #!/bin/sh
+    echo "=== keyboard kowboys system status ==="
+    echo "time: $(date)"
+    echo "uptime: $(uptime)"
+    echo "---"
+    echo "services:"
+    systemctl list-units --state=running --type=service | head -10
+    echo "---"
+    echo "connections:"
+    ss -tuln | head -10
+    echo "---"
+    echo "recent auth attempts:"
+    grep "authentication failure" /var/log/auth.log 2>/dev/null | tail -5 || echo "no recent auth failures"
