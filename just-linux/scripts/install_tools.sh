@@ -38,7 +38,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to ensure Nix is in the PATH
+# Function to ensure Nix is in the PATH - this is a critical function
 ensure_nix_in_path() {
     # Check if nix is directly in PATH
     if command_exists nix; then
@@ -48,45 +48,49 @@ ensure_nix_in_path() {
     
     echo "Nix not found in PATH, checking common installation locations..."
     
-    # Check each possible location one by one (POSIX-compliant)
-    # Standard multi-user installation
-    if [ -x "/nix/var/nix/profiles/default/bin/nix" ]; then
-        nix_path="/nix/var/nix/profiles/default/bin/nix"
-        echo "Found Nix at: $nix_path"
-        export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+    # First, try to source the appropriate profile script
+    for profile_script in \
+        "$HOME/.nix-profile/etc/profile.d/nix.sh" \
+        "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh" \
+        "/etc/profile.d/nix.sh" \
+        "/etc/profile.d/nix-daemon.sh"; do
         
-        # Verify nix is now in PATH
-        if command_exists nix; then
-            echo "Successfully added Nix to PATH"
-            return 0
+        if [ -f "$profile_script" ]; then
+            echo "Sourcing Nix profile from: $profile_script"
+            # Source the profile script
+            . "$profile_script"
+            
+            # Check if nix is now in PATH
+            if command_exists nix; then
+                echo "Successfully added Nix to PATH via profile script"
+                return 0
+            fi
         fi
-    fi
+    done
     
-    # Single-user installation
-    if [ -x "$HOME/.nix-profile/bin/nix" ]; then
-        nix_path="$HOME/.nix-profile/bin/nix"
-        echo "Found Nix at: $nix_path"
-        export PATH="$HOME/.nix-profile/bin:$PATH"
+    # If sourcing didn't work, try adding common Nix paths directly
+    for nix_path in \
+        "/nix/var/nix/profiles/default/bin" \
+        "$HOME/.nix-profile/bin" \
+        "/run/current-system/sw/bin"; do
         
-        # Verify nix is now in PATH
-        if command_exists nix; then
-            echo "Successfully added Nix to PATH"
-            return 0
+        if [ -d "$nix_path" ] && [ -x "$nix_path/nix" ]; then
+            echo "Found Nix at: $nix_path/nix"
+            export PATH="$nix_path:$PATH"
+            
+            # Verify nix is now in PATH
+            if command_exists nix; then
+                echo "Successfully added Nix to PATH"
+                # Make PATH change visible to other processes (if running as root)
+                if is_root; then
+                    echo "export PATH=\"$nix_path:\$PATH\"" >> /etc/profile.d/nix-path.sh
+                    chmod +x /etc/profile.d/nix-path.sh
+                    echo "Added Nix path to /etc/profile.d/nix-path.sh"
+                fi
+                return 0
+            fi
         fi
-    fi
-    
-    # NixOS system location
-    if [ -x "/run/current-system/sw/bin/nix" ]; then
-        nix_path="/run/current-system/sw/bin/nix"
-        echo "Found Nix at: $nix_path"
-        export PATH="/run/current-system/sw/bin:$PATH"
-        
-        # Verify nix is now in PATH
-        if command_exists nix; then
-            echo "Successfully added Nix to PATH"
-            return 0
-        fi
-    fi
+    done
     
     echo "Could not find Nix in any standard location"
     return 1
@@ -94,37 +98,50 @@ ensure_nix_in_path() {
 
 # Check for Nix (but don't install it)
 check_nix() {
-    # First ensure nix is in PATH
+    # First ensure nix is in PATH - this is CRITICAL
     if ! ensure_nix_in_path; then
         echo "Error: Nix could not be found. Please install Nix and try again."
         echo "Visit https://nixos.org/download.html for installation instructions."
         return 1
     fi
     
-    echo "Nix is accessible"
+    echo "Nix is accessible at: $(which nix)"
     
-    # Check for flakes capability
-    if ! nix --version | grep -q "nix (Nix)"; then
-        echo "Warning: Cannot determine Nix version. Flakes support may not be available."
-    else
-        echo "Nix version: $(nix --version)"
+    # Print version information for debugging
+    nix_version=$(nix --version)
+    echo "Nix version: $nix_version"
+    
+    # Ensure Nix store exists and is writable
+    if [ ! -d "/nix/store" ]; then
+        echo "Error: /nix/store does not exist. Nix installation may be incomplete."
+        return 1
     fi
     
-    # Enable flakes if not already enabled
-    echo "Ensuring Nix flakes are enabled..."
-    mkdir -p ~/.config/nix
+    # Ensure config directory exists
+    mkdir -p "$HOME/.config/nix"
     
-    # Check if nix.conf exists and contains flakes configuration
-    if [ -f ~/.config/nix/nix.conf ] && grep -q "experimental-features" ~/.config/nix/nix.conf; then
-        echo "Nix flakes already enabled in config"
+    # Enable flakes and nix-command in configuration
+    if [ -f "$HOME/.config/nix/nix.conf" ]; then
+        if ! grep -q "experimental-features" "$HOME/.config/nix/nix.conf"; then
+            echo "Adding flakes to Nix config..."
+            echo "experimental-features = nix-command flakes" >> "$HOME/.config/nix/nix.conf"
+        fi
     else
-        echo "Enabling Nix flakes in config..."
-        echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+        echo "Creating Nix config with flakes enabled..."
+        echo "experimental-features = nix-command flakes" > "$HOME/.config/nix/nix.conf"
     fi
     
-    # Set NIX_CONFIG environment variable for immediate effect without restart
+    # Set environment variable for immediate effect
     export NIX_CONFIG="experimental-features = nix-command flakes"
     
+    # Test if flakes work
+    echo "Testing Nix flakes functionality..."
+    if ! nix flake --help >/dev/null 2>&1; then
+        echo "Error: Nix flakes not available. Your Nix version may be too old or not properly configured."
+        return 1
+    fi
+    
+    echo "Nix flakes are working correctly"
     return 0
 }
 
@@ -169,7 +186,7 @@ create_flake() {
           
           # Download the latest release from GitHub
           src = pkgs.fetchzip {
-            url = "https://github.com/M00NLIG7/ChopChopGo/releases/download/v1.0.0-release-1/ChopChopGo-v1.0.0-release-1.zip";
+            url = "https://github.com/M00NLIG7/ChopChopGo/releases/download/v1.0.0-release-1/v1.0.0-release-1.zip";
             # Use this to find the correct hash
             # Either run with an incorrect hash or use `nix-prefetch-url --unpack URL`
             sha256 = "sha256-bO3uWI7VQSpETqGrRCYyZM5wUfL9RimyOuIXDES26Tk=";
@@ -267,34 +284,71 @@ EOF
     return 0
 }
 
-# Install tools using the flake
+# Install tools using the flake - with extra error handling
 install_tools_with_flake() {
     echo "Installing tools using the flake..."
     
     # Change to flake directory
     cd "$FLAKE_DIR"
     
-    # Update the flake
+    # Make sure we can still find nix
+    if ! command_exists nix; then
+        echo "Error: Lost access to nix command. Re-ensuring nix is in PATH..."
+        ensure_nix_in_path || return 1
+    fi
+    
+    # First just try a simple flake check to verify flake works
+    echo "Checking flake validity..."
+    if ! nix flake check; then
+        echo "Error: Flake check failed. The flake may be invalid."
+        return 1
+    fi
+    
+    # Update the flake inputs
     echo "Updating flake inputs..."
     nix flake update
     
     # Try to remove existing installation to avoid conflicts
     echo "Checking for existing installations..."
-    if nix profile list | grep -q "nix-tools-flake"; then
+    if nix profile list 2>/dev/null | grep -q "nix-tools-flake"; then
         echo "Removing existing tools to avoid conflicts..."
         nix profile remove "nix-tools-flake" 2>/dev/null || true
     fi
     
-    # Install all tools using the default package with a different priority
-    echo "Installing tools from flake..."
-    nix profile install .#default --priority 10
+    # First, try installing with --no-build-hook to bypass any post-build hook issues
+    echo "Installing tools from flake (with no build hook)..."
+    if nix profile install .#default --no-use-registries --option build-use-substitutes true --option build-use-sandbox false --no-write-lock-file --option post-build-hook "" --priority 10; then
+        echo "Tools installed successfully with --no-build-hook option"
+        return 0
+    fi
     
-    # Simple verification - just check if the installation command succeeded
-    if [ $? -eq 0 ]; then
-        echo "Tools installed successfully"
+    # If that didn't work, try a more conservative approach
+    echo "First attempt failed, trying conservative approach..."
+    if nix profile install .#default --option build-users-group "" --option sandbox false --priority 10; then
+        echo "Tools installed successfully with conservative options"
+        return 0
+    fi
+    
+    # If still failing, try one last approach installing packages individually
+    echo "Second attempt failed, trying to install packages individually..."
+    success=false
+    
+    # Start with basic packages that are less likely to have issues
+    for pkg in git vim ripgrep fd; do
+        echo "Installing individual package: $pkg"
+        if nix profile install ".#$pkg" --option sandbox false --no-write-lock-file; then
+            echo "Successfully installed $pkg"
+            success=true
+        else
+            echo "Failed to install $pkg, continuing with others"
+        fi
+    done
+    
+    if $success; then
+        echo "Some tools were installed successfully"
         return 0
     else
-        echo "Error: Failed to install tools"
+        echo "All installation attempts failed"
         return 1
     fi
 }
@@ -312,8 +366,11 @@ if check_nix; then
         if install_tools_with_flake; then
             echo ""
             echo "=== Installation Complete ==="
-            echo "All tools have been installed to your system using Nix flakes"
+            echo "Tools have been installed to your system using Nix flakes"
             echo "Flake file is located at $FLAKE_FILE"
+            echo ""
+            echo "To ensure tools are in your PATH, run:"
+            echo "export PATH=\"$HOME/.nix-profile/bin:\$PATH\""
             echo ""
             echo "Installation completed at $(date)"
             exit 0

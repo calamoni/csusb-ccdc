@@ -1,3 +1,19 @@
+[CmdletBinding()]
+param (
+    [Parameter(Mandatory=$true)]
+    [string]$OutputFile,
+    
+    [Parameter()]
+    [int]$PasswordLength = 16,
+    
+    [Parameter()]
+    [switch]$ForceChangeAtLogon,
+    
+    [Parameter()]
+    [switch]$UnlockAccounts
+)
+
+
 function Invoke-ADPasswordRotation {
     [CmdletBinding()]
     param (
@@ -226,3 +242,7 @@ function Invoke-ADPasswordRotation {
         [System.GC]::Collect()
     }
 }
+
+# Now call the function with parameters passed from justfile
+Write-Verbose "Starting password rotation with output to: $OutputFile"
+Invoke-ADPasswordRotation -OutputFile $OutputFile -PasswordLength $PasswordLength -ForceChangeAtLogon:$ForceChangeAtLogon -UnlockAccounts:$UnlockAccounts
