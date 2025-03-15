@@ -1,9 +1,4 @@
 #!/bin/sh
-# Script to analyze system logs for suspicious activity
-# Usage: log_analyzer.sh [hours]
-
-set -e
-
 # Default to 1 hour if no argument is provided
 if [ $# -ge 1 ]; then
     HOURS="$1"
@@ -15,88 +10,95 @@ echo "=== Log Analysis - Last $HOURS Hour(s) ==="
 echo "Started at $(date)"
 echo ""
 
-# Calculate the timestamp for X hours ago
-HOURS_AGO=$(date -d "$HOURS hours ago" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date -v-"${HOURS}H" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
-if [ -z "$HOURS_AGO" ]; then
-    # Fallback method if date commands fail
-    SECONDS_AGO=$((HOURS * 3600))
-    HOURS_AGO=$(date -d "@$(($(date +%s) - SECONDS_AGO))" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date -r "$(($(date +%s) - SECONDS_AGO))" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
-    
-    if [ -z "$HOURS_AGO" ]; then
-        echo "Warning: Could not calculate timestamp for $HOURS hours ago. Using all available logs."
-        HOURS_AGO=""
-    fi
-fi
-
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# BusyBox-compatible function to get today's date in YYYY-MM-DD format
+get_today() {
+    date "+%Y-%m-%d" 2>/dev/null || date "+%Y-%m-%d" 2>/dev/null
+}
+
+TODAY=$(get_today)
+
 # Function to filter logs by time if possible
+# This simplified version just filters for today's date
 filter_by_time() {
-    if [ -n "$HOURS_AGO" ]; then
-        grep -a "$HOURS_AGO\|$(date +%Y-%m-%d)" 2>/dev/null || cat
+    if [ -n "$TODAY" ]; then
+        grep "$TODAY" 2>/dev/null || cat
     else
         cat
     fi
 }
 
+echo "Note: On BusyBox systems, time filtering is limited to today's date ($TODAY)"
+echo ""
+
 # Analysis: Authentication logs
 echo "=== Authentication Logs Analysis ==="
-if [ -f "/var/log/auth.log" ]; then
-    echo "Failed login attempts:"
-    grep -a "Failed password\|authentication failure\|Invalid user" /var/log/auth.log | filter_by_time | sort | uniq -c | sort -nr
-    
-    echo "Successful logins:"
-    grep -a "Accepted password\|session opened" /var/log/auth.log | filter_by_time | sort | uniq -c | sort -nr
-    
-    echo "Root login attempts:"
-    grep -a "ROOT LOGIN\|root" /var/log/auth.log | filter_by_time | sort | uniq -c | sort -nr
-elif [ -f "/var/log/secure" ]; then
-    echo "Failed login attempts:"
-    grep -a "Failed password\|authentication failure\|Invalid user" /var/log/secure | filter_by_time | sort | uniq -c | sort -nr
-    
-    echo "Successful logins:"
-    grep -a "Accepted password\|session opened" /var/log/secure | filter_by_time | sort | uniq -c | sort -nr
-    
-    echo "Root login attempts:"
-    grep -a "ROOT LOGIN\|root" /var/log/secure | filter_by_time | sort | uniq -c | sort -nr
-else
+AUTH_FOUND=0
+
+for auth_log in "/var/log/auth.log" "/var/log/secure"; do
+    if [ -f "$auth_log" ]; then
+        AUTH_FOUND=1
+        echo "Analyzing $auth_log:"
+        
+        echo "Failed login attempts:"
+        grep "Failed password\|authentication failure\|Invalid user" "$auth_log" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null || echo "None found or command failed"
+        
+        echo "Successful logins:"
+        grep "Accepted password\|session opened" "$auth_log" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null || echo "None found or command failed"
+        
+        echo "Root login attempts:"
+        grep "ROOT LOGIN\|root" "$auth_log" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null || echo "None found or command failed"
+    fi
+done
+
+if [ "$AUTH_FOUND" -eq 0 ]; then
     echo "No authentication logs found at /var/log/auth.log or /var/log/secure"
 fi
 echo ""
 
 # Analysis: Sudo usage
 echo "=== Sudo Usage Analysis ==="
-if [ -f "/var/log/auth.log" ]; then
-    grep -a "sudo:" /var/log/auth.log | filter_by_time | sort | uniq -c | sort -nr
-elif [ -f "/var/log/secure" ]; then
-    grep -a "sudo:" /var/log/secure | filter_by_time | sort | uniq -c | sort -nr
-else
+SUDO_FOUND=0
+
+for auth_log in "/var/log/auth.log" "/var/log/secure"; do
+    if [ -f "$auth_log" ]; then
+        SUDO_FOUND=1
+        grep "sudo:" "$auth_log" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null || echo "No sudo entries found in $auth_log"
+    fi
+done
+
+if [ "$SUDO_FOUND" -eq 0 ]; then
     echo "No sudo logs found at /var/log/auth.log or /var/log/secure"
 fi
 echo ""
 
 # Analysis: System logs
 echo "=== System Logs Analysis ==="
-if [ -f "/var/log/syslog" ]; then
-    LOG_FILE="/var/log/syslog"
-elif [ -f "/var/log/messages" ]; then
-    LOG_FILE="/var/log/messages"
-else
-    LOG_FILE=""
-    echo "No system logs found at /var/log/syslog or /var/log/messages"
-fi
+LOG_FILE=""
+
+for syslog in "/var/log/syslog" "/var/log/messages"; do
+    if [ -f "$syslog" ]; then
+        LOG_FILE="$syslog"
+        break
+    fi
+done
 
 if [ -n "$LOG_FILE" ]; then
+    echo "Analyzing $LOG_FILE:"
+    
     echo "Critical errors and warnings:"
-    grep -a -i "error\|critical\|warning\|fail" "$LOG_FILE" | filter_by_time | grep -v "does not exist\|not found" | sort | uniq -c | sort -nr | head -20
+    grep -i "error\|critical\|warning\|fail" "$LOG_FILE" 2>/dev/null | filter_by_time | grep -v "does not exist\|not found" 2>/dev/null | sort | uniq -c | sort -rn 2>/dev/null | head -20 || echo "None found or command failed"
     echo "(showing top 20 entries only)"
     
     echo "Service restarts:"
-    grep -a "restart\|starting\|started\|stopping\|stopped" "$LOG_FILE" | filter_by_time | sort | uniq -c | sort -nr | head -20
+    grep "restart\|starting\|started\|stopping\|stopped" "$LOG_FILE" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null | head -20 || echo "None found or command failed"
     echo "(showing top 20 entries only)"
+else
+    echo "No system logs found at /var/log/syslog or /var/log/messages"
 fi
 echo ""
 
@@ -104,43 +106,40 @@ echo ""
 if command_exists journalctl; then
     echo "=== Journalctl Analysis ==="
     
-    echo "System errors (last $HOURS hour(s)):"
-    if [ -n "$HOURS_AGO" ]; then
-        journalctl -p err..emerg --since "$HOURS_AGO" | grep -v "does not exist\|not found" | sort | uniq -c | sort -nr | head -20
-    else
-        journalctl -p err..emerg --since "$(date +%Y-%m-%d)" | grep -v "does not exist\|not found" | sort | uniq -c | sort -nr | head -20
-    fi
+    echo "System errors (today):"
+    journalctl -p err..emerg --since "$TODAY" 2>/dev/null | grep -v "does not exist\|not found" 2>/dev/null | sort | uniq -c | sort -rn 2>/dev/null | head -20 || echo "No entries found or command failed"
     echo "(showing top 20 entries only)"
     
-    echo "Authentication events (last $HOURS hour(s)):"
-    if [ -n "$HOURS_AGO" ]; then
-        journalctl _COMM=sshd --since "$HOURS_AGO" | sort | uniq -c | sort -nr | head -20
-    else
-        journalctl _COMM=sshd --since "$(date +%Y-%m-%d)" | sort | uniq -c | sort -nr | head -20
-    fi
+    echo "Authentication events (today):"
+    journalctl _COMM=sshd --since "$TODAY" 2>/dev/null | sort | uniq -c | sort -rn 2>/dev/null | head -20 || echo "No entries found or command failed"
     echo "(showing top 20 entries only)"
+else
+    echo "=== Journalctl Analysis ==="
+    echo "journalctl command not available"
 fi
 echo ""
 
 # Analysis: HTTP server logs (if available)
 echo "=== Web Server Log Analysis ==="
-HTTP_LOGS="/var/log/apache2/access.log /var/log/httpd/access_log /var/log/nginx/access.log"
-for log in $HTTP_LOGS; do
+HTTP_FOUND=0
+
+for log in "/var/log/apache2/access.log" "/var/log/httpd/access_log" "/var/log/nginx/access.log"; do
     if [ -f "$log" ]; then
+        HTTP_FOUND=1
         echo "Analyzing $log:"
         
         echo "Top client IPs:"
-        cat "$log" | filter_by_time | awk '{print $1}' | sort | uniq -c | sort -nr | head -10
+        cat "$log" 2>/dev/null | filter_by_time | awk '{print $1}' 2>/dev/null | sort | uniq -c | sort -rn 2>/dev/null | head -10 || echo "Could not process log file"
         
         echo "HTTP error responses (4xx, 5xx):"
-        grep -a " 4[0-9][0-9] \| 5[0-9][0-9] " "$log" | filter_by_time | sort | uniq -c | sort -nr | head -10
+        grep " 4[0-9][0-9] \| 5[0-9][0-9] " "$log" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null | head -10 || echo "No errors found or command failed"
         
         echo "Unusual HTTP requests (potential attacks):"
-        grep -a -i "SELECT \|UNION \|.php \|cmd \|config \|admin \|.aspx " "$log" | filter_by_time | sort | uniq -c | sort -nr | head -10
+        grep -i "SELECT \|UNION \|.php \|cmd \|config \|admin \|.aspx " "$log" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null | head -10 || echo "None found or command failed"
     fi
 done
 
-if [ ! -f "/var/log/apache2/access.log" ] && [ ! -f "/var/log/httpd/access_log" ] && [ ! -f "/var/log/nginx/access.log" ]; then
+if [ "$HTTP_FOUND" -eq 0 ]; then
     echo "No web server logs found"
 fi
 echo ""
@@ -149,26 +148,32 @@ echo ""
 echo "=== Failed Process Analysis ==="
 if command_exists systemctl; then
     echo "Failed systemd services:"
-    systemctl --failed
+    systemctl --failed 2>/dev/null || echo "Could not check failed services"
     
-    echo "Recent service failures (last $HOURS hour(s)):"
-    if [ -n "$HOURS_AGO" ]; then
-        journalctl -p err..emerg --since "$HOURS_AGO" _SYSTEMD_UNIT | sort | uniq -c | sort -nr | head -10
-    else
-        journalctl -p err..emerg --since "$(date +%Y-%m-%d)" _SYSTEMD_UNIT | sort | uniq -c | sort -nr | head -10
+    if command_exists journalctl; then
+        echo "Recent service failures (today):"
+        journalctl -p err..emerg --since "$TODAY" _SYSTEMD_UNIT 2>/dev/null | sort | uniq -c | sort -rn 2>/dev/null | head -10 || echo "None found or command failed"
     fi
+else
+    echo "systemctl command not available"
 fi
 echo ""
 
 # Analysis: Cron jobs
 echo "=== Cron Job Analysis ==="
+CRON_FOUND=0
+
 if [ -f "/var/log/cron" ]; then
-    grep -a -v "pam_unix\|session\|CMD" /var/log/cron | filter_by_time | sort | uniq -c | sort -nr | head -20
+    CRON_FOUND=1
+    grep -v "pam_unix\|session\|CMD" "/var/log/cron" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null | head -20 || echo "Could not process cron log"
     echo "(showing top 20 entries only)"
 elif [ -f "/var/log/syslog" ]; then
-    grep -a "CRON" /var/log/syslog | filter_by_time | sort | uniq -c | sort -nr | head -20
+    CRON_FOUND=1
+    grep "CRON" "/var/log/syslog" 2>/dev/null | filter_by_time | sort | uniq -c | sort -rn 2>/dev/null | head -20 || echo "Could not process syslog for cron entries"
     echo "(showing top 20 entries only)"
-else
+fi
+
+if [ "$CRON_FOUND" -eq 0 ]; then
     echo "No cron logs found"
 fi
 echo ""
@@ -177,7 +182,7 @@ echo ""
 echo "=== Kernel Log Analysis ==="
 if command_exists dmesg; then
     echo "Recent kernel errors and warnings:"
-    dmesg | grep -a -i "error\|warn\|fail" | tail -20
+    dmesg 2>/dev/null | grep -i "error\|warn\|fail" 2>/dev/null | tail -20 || echo "Could not process dmesg output"
     echo "(showing last 20 entries only)"
 else
     echo "dmesg command not available"
@@ -186,30 +191,32 @@ echo ""
 
 # Generate log summary
 echo "=== Log Analysis Summary ==="
-echo "Period analyzed: Last $HOURS hour(s)"
+echo "Period analyzed: Today ($TODAY)"
 
 # Count authentication failures
 AUTH_FAILURES=0
-if [ -f "/var/log/auth.log" ]; then
-    AUTH_FAILURES=$(grep -a "Failed password\|authentication failure" /var/log/auth.log | filter_by_time | wc -l)
-elif [ -f "/var/log/secure" ]; then
-    AUTH_FAILURES=$(grep -a "Failed password\|authentication failure" /var/log/secure | filter_by_time | wc -l)
-fi
+for auth_log in "/var/log/auth.log" "/var/log/secure"; do
+    if [ -f "$auth_log" ]; then
+        COUNT=$(grep "Failed password\|authentication failure" "$auth_log" 2>/dev/null | filter_by_time | wc -l 2>/dev/null || echo 0)
+        AUTH_FAILURES=$((AUTH_FAILURES + COUNT))
+    fi
+done
 echo "Authentication failures: $AUTH_FAILURES"
 
 # Count sudo commands
 SUDO_COMMANDS=0
-if [ -f "/var/log/auth.log" ]; then
-    SUDO_COMMANDS=$(grep -a "sudo:" /var/log/auth.log | filter_by_time | wc -l)
-elif [ -f "/var/log/secure" ]; then
-    SUDO_COMMANDS=$(grep -a "sudo:" /var/log/secure | filter_by_time | wc -l)
-fi
+for auth_log in "/var/log/auth.log" "/var/log/secure"; do
+    if [ -f "$auth_log" ]; then
+        COUNT=$(grep "sudo:" "$auth_log" 2>/dev/null | filter_by_time | wc -l 2>/dev/null || echo 0)
+        SUDO_COMMANDS=$((SUDO_COMMANDS + COUNT))
+    fi
+done
 echo "Sudo commands executed: $SUDO_COMMANDS"
 
 # Count system errors
 SYS_ERRORS=0
 if [ -n "$LOG_FILE" ]; then
-    SYS_ERRORS=$(grep -a -i "error\|critical\|fail" "$LOG_FILE" | filter_by_time | wc -l)
+    SYS_ERRORS=$(grep -i "error\|critical\|fail" "$LOG_FILE" 2>/dev/null | filter_by_time | wc -l 2>/dev/null || echo 0)
 fi
 echo "System errors/failures: $SYS_ERRORS"
 

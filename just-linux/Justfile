@@ -114,8 +114,8 @@ help recipe="":
 init:
     #!/bin/sh
     echo "setting up keyboard kowboys operation environment..."
-    sudo mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}}
-    sudo chmod -R 750 {{base_dir}}
+    mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}}
+    chmod -R 750 {{base_dir}}
     echo "directory structure created at {{base_dir}}"
 
 # Run baseline hardening using chimera
@@ -154,13 +154,23 @@ harden:
 backup system_name="all":
     #!/bin/sh
     echo "backing up {{system_name}} configurations and system state..."
+    
+    # Check if we're running as root for operations that require it
+    if [ -f "/etc/passwd" ] || [ -f "/etc/shadow" ] || [ -d "/etc/ssh" ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "ERROR: Root privileges required for backing up system files."
+            echo "Please run this command as root or with appropriate privileges."
+            exit 1
+        fi
+    fi
+    
     # Export all keyboard_kowboys environment variables
     export KK_BASE_DIR="{{base_dir}}"
     export KK_CONFIG_DIR="{{config_dir}}"
     export KK_LOG_DIR="{{log_dir}}"
     
-    # Run the backup script with the environment variables
-    sudo -E {{scripts_dir}}/backup.sh -v {{system_name}} {{backup_dir}}/{{system_name}}
+    # Run the backup script with the environment variables (no sudo)
+    {{scripts_dir}}/backup.sh -v {{system_name}} {{backup_dir}}/{{system_name}}
     
     # Create a quick snapshot of current network connections in a separate file
     # for easy access without needing to browse the full backup
@@ -171,19 +181,19 @@ backup system_name="all":
     echo "System: $(hostname)" >> $CONNECTION_FILE
     echo "" >> $CONNECTION_FILE
     
-    # Use available tool to capture connections
+    # Use available tool to capture connections (removed sudo)
     if command -v ss >/dev/null 2>&1; then
         echo "== LISTENING PORTS ==" >> $CONNECTION_FILE
-        sudo ss -tuln >> $CONNECTION_FILE
+        ss -tuln >> $CONNECTION_FILE
         echo "" >> $CONNECTION_FILE
         echo "== ALL CONNECTIONS ==" >> $CONNECTION_FILE
-        sudo ss -tunapl >> $CONNECTION_FILE
+        ss -tunapl >> $CONNECTION_FILE
     elif command -v netstat >/dev/null 2>&1; then
         echo "== LISTENING PORTS ==" >> $CONNECTION_FILE
-        sudo netstat -tuln >> $CONNECTION_FILE
+        netstat -tuln >> $CONNECTION_FILE
         echo "" >> $CONNECTION_FILE
         echo "== ALL CONNECTIONS ==" >> $CONNECTION_FILE
-        sudo netstat -tunapl >> $CONNECTION_FILE
+        netstat -tunapl >> $CONNECTION_FILE
     else
         echo "Neither ss nor netstat available" >> $CONNECTION_FILE
     fi
@@ -210,6 +220,14 @@ diff target="configs" system_type="all" date="":
     #!/bin/sh
     echo "Comparing current {{target}} with backup data..."
     
+    # Check if we're running as root for operations that require it
+    if [ "{{target}}" = "configs" ] || [ "{{target}}" = "files" ] || [ "{{target}}" = "all" ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "WARNING: Some file comparisons may fail without root privileges."
+            echo "Consider running as root for complete results."
+        fi
+    fi
+    
     # Make sure directories exist
     mkdir -p {{backup_dir}}/{{system_type}}/latest/system_info || true
     
@@ -232,8 +250,8 @@ diff target="configs" system_type="all" date="":
         OPTS="$OPTS -d {{date}}"
     fi
     
-    # Run command
-    sudo -E {{scripts_dir}}/diff.sh $OPTS {{target}}
+    # Run command (no sudo)
+    {{scripts_dir}}/diff.sh $OPTS {{target}}
 
 # Compare listening ports to detect new services
 # 
@@ -356,7 +374,14 @@ verify-services critical_only="true":
 integrity-quick:
     #!/bin/sh
     echo "running quick integrity checks..."
-    find /bin /sbin /usr/bin -type f -exec md5sum {} \; | grep -vf {{backup_dir}}/binaries.md5
+    
+    # Check for root privileges since we need to access system binaries
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "WARNING: Running with limited privileges. Some files may not be accessible."
+        echo "For complete results, run this command as root."
+    fi
+    
+    find /bin /sbin /usr/bin -type f -exec md5sum {} \; 2>/dev/null | grep -vf {{backup_dir}}/binaries.md5
     echo "checking for new suid binaries..."
     find / -perm -4000 2>/dev/null
 
@@ -367,7 +392,15 @@ integrity-quick:
 # 
 # Usage: just reset-firewall
 reset-firewall:
-    @{{scripts_dir}}/reset_firewall.sh
+    #!/bin/sh
+    # Check if we're running as root for firewall operations
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "ERROR: Root privileges required for firewall operations."
+        echo "Please run this command as root or with appropriate privileges."
+        exit 1
+    fi
+    
+    {{scripts_dir}}/reset_firewall.sh
 
 # Review and analyze system logs
 # 
@@ -380,7 +413,16 @@ reset-firewall:
 #   just analyze-logs       # Analyze the last hour of logs
 #   just analyze-logs 24    # Analyze the last 24 hours of logs
 analyze-logs hours="1":
-    @{{scripts_dir}}/log_analyzer.sh {{hours}}
+    #!/bin/sh
+    # Check if we need root for log access
+    if [ ! -r "/var/log/syslog" ] && [ ! -r "/var/log/messages" ] && [ ! -r "/var/log/auth.log" ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "WARNING: Limited log access. Some logs may not be accessible."
+            echo "For complete results, run this command as root."
+        fi
+    fi
+    
+    {{scripts_dir}}/log_analyzer.sh {{hours}}
 
 # Create an incident response snapshot
 # 
@@ -394,11 +436,27 @@ analyze-logs hours="1":
 incident-snapshot name:
     #!/bin/sh
     echo "creating incident snapshot: {{name}}"
+    
+    # Check for root privileges for complete system information
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "WARNING: Running with limited privileges. Some system information may not be collected."
+        echo "For complete results, run this command as root."
+    fi
+    
     mkdir -p {{backup_dir}}/incidents/{{name}}
     ps aux > {{backup_dir}}/incidents/{{name}}/processes.txt
-    netstat -tulpn > {{backup_dir}}/incidents/{{name}}/connections.txt
-    lsof > {{backup_dir}}/incidents/{{name}}/open_files.txt
-    journalctl -n 500 > {{backup_dir}}/incidents/{{name}}/recent_logs.txt
+    netstat -tulpn > {{backup_dir}}/incidents/{{name}}/connections.txt 2>/dev/null || ss -tulpn > {{backup_dir}}/incidents/{{name}}/connections.txt
+    
+    # Only attempt lsof if likely to succeed
+    lsof > {{backup_dir}}/incidents/{{name}}/open_files.txt 2>/dev/null || echo "Could not collect open files information" > {{backup_dir}}/incidents/{{name}}/open_files.txt
+    
+    # Use journalctl if available, otherwise try direct log files
+    if command -v journalctl >/dev/null 2>&1; then
+        journalctl -n 500 > {{backup_dir}}/incidents/{{name}}/recent_logs.txt 2>/dev/null || echo "Could not access journalctl logs" > {{backup_dir}}/incidents/{{name}}/recent_logs.txt
+    else
+        tail -n 500 /var/log/syslog /var/log/auth.log /var/log/messages 2>/dev/null > {{backup_dir}}/incidents/{{name}}/recent_logs.txt || echo "Could not access log files" > {{backup_dir}}/incidents/{{name}}/recent_logs.txt
+    fi
+    
     echo "snapshot saved to {{backup_dir}}/incidents/{{name}}/"
 
 # Install or update security tools
@@ -425,6 +483,13 @@ install-tools:
 # 
 # Usage: just find-pii
 find-pii:
+    #!/bin/sh
+    # Check for root privileges for complete file access
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "WARNING: Running with limited privileges. Some files may not be accessible."
+        echo "For complete results, run this command as root."
+    fi
+    
     {{scripts_dir}}/find_pii.sh
 
 # Display system status dashboard
@@ -440,10 +505,14 @@ status:
     echo "uptime: $(uptime)"
     echo "---"
     echo "services:"
-    systemctl list-units --state=running --type=service | head -10
+    systemctl list-units --state=running --type=service 2>/dev/null | head -10 || echo "systemctl not available"
     echo "---"
     echo "connections:"
-    ss -tuln | head -10
+    ss -tuln 2>/dev/null | head -10 || netstat -tuln 2>/dev/null | head -10 || echo "network tools not available"
     echo "---"
     echo "recent auth attempts:"
-    grep "authentication failure" /var/log/auth.log 2>/dev/null | tail -5 || echo "no recent auth failures"
+    if [ -r "/var/log/auth.log" ]; then
+        grep "authentication failure" /var/log/auth.log 2>/dev/null | tail -5 || echo "no recent auth failures"
+    else
+        echo "auth log not accessible - run as root to view auth failures"
+    fi

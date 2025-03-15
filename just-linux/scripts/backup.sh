@@ -322,8 +322,9 @@ perform_system_dump() {
             fi
             
             if command_exists psql; then
-                sudo -u postgres psql -c "\l" > "$dump_dir/postgres_databases.txt" 2>/dev/null || true
-                sudo -u postgres psql -c "\du" > "$dump_dir/postgres_users.txt" 2>/dev/null || true
+                # Using -U postgres instead of sudo
+                psql -U postgres -c "\l" > "$dump_dir/postgres_databases.txt" 2>/dev/null || true
+                psql -U postgres -c "\du" > "$dump_dir/postgres_users.txt" 2>/dev/null || true
             fi
             ;;
     esac
