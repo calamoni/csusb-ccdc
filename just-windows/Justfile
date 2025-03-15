@@ -27,7 +27,7 @@ default:
 # Display help for recipes and their options
 help recipe="":
     #!{{shebang}}
-    if ('{{recipe}}' -eq '') { 
+    if ('{{recipe}}' -eq '') {
         Write-Host '===== KEYBOARD KOWBOYS OPERATIONS HELP =====' -ForegroundColor Cyan
         Write-Host 'Usage: just help <recipe>' -ForegroundColor Yellow
         Write-Host ''
@@ -35,9 +35,9 @@ help recipe="":
         just --summary
         Write-Host ''
         Write-Host 'For detailed help on a specific recipe, run: just help <recipe-name>' -ForegroundColor Yellow
-    } else { 
+    } else {
         Write-Host '===== HELP: {{recipe}} =====' -ForegroundColor Cyan
-        if ('{{recipe}}' -eq 'backup') { 
+        if ('{{recipe}}' -eq 'backup') {
             Write-Host 'USAGE: just backup [system_name]' -ForegroundColor Yellow
             Write-Host ''
             Write-Host 'DESCRIPTION:' -ForegroundColor Green
@@ -58,7 +58,7 @@ help recipe="":
             Write-Host '  just backup              # Backup all systems'
             Write-Host '  just backup network      # Backup only network configs'
             Write-Host '  just backup database     # Backup database configs'
-        } elseif ('{{recipe}}' -eq 'network-eval') { 
+        } elseif ('{{recipe}}' -eq 'network-eval') {
             Write-Host 'USAGE: just network-eval [level]' -ForegroundColor Yellow
             Write-Host ''
             Write-Host 'DESCRIPTION:' -ForegroundColor Green
@@ -71,7 +71,7 @@ help recipe="":
             Write-Host 'EXAMPLES:' -ForegroundColor Green
             Write-Host '  just network-eval           # Basic network connection check'
             Write-Host '  just network-eval detailed  # Detailed network connection analysis'
-        } else { 
+        } else {
             Write-Host 'USAGE: just {{recipe}}' -ForegroundColor Yellow
             Write-Host ''
             Write-Host 'DESCRIPTION:' -ForegroundColor Green
@@ -79,7 +79,7 @@ help recipe="":
             Write-Host ''
             Write-Host 'EXAMPLES:' -ForegroundColor Green
             Write-Host '  just {{recipe}}  # Run the {{recipe}} command'
-        } 
+        }
     }
 
 # Initialize directory structure (run once or after reset)
@@ -87,13 +87,13 @@ init:
     #!{{shebang}}
     Write-Host 'Setting up keyboard kowboys operation environment...' -ForegroundColor Green
     $Dirs = @('{{base_dir}}', '{{scripts_dir}}', '{{ops_dir}}', '{{backup_dir}}', '{{tools_dir}}', '{{config_dir}}', '{{log_dir}}')
-    foreach ($Dir in $Dirs) { 
-        if (-not (Test-Path $Dir)) { 
+    foreach ($Dir in $Dirs) {
+        if (-not (Test-Path $Dir)) {
             New-Item -Path $Dir -ItemType Directory -Force | Out-Null
             Write-Host ('Created directory: ' + $Dir) -ForegroundColor Yellow
-        } else { 
+        } else {
             Write-Host ('Directory already exists: ' + $Dir) -ForegroundColor Cyan
-        } 
+        }
     }
     $Acl = Get-Acl -Path '{{base_dir}}'
     $Ar = New-Object System.Security.AccessControl.FileSystemAccessRule('Administrators', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
@@ -115,7 +115,7 @@ backup system_name="all":
     $env:KK_CONFIG_DIR = '{{config_dir}}'
     $env:KK_LOG_DIR = '{{log_dir}}'
     $env:KK_BACKUP_DIR = '{{backup_dir}}'
-    if (-not (Test-Path '{{backup_dir}}/{{system_name}}')) { 
+    if (-not (Test-Path '{{backup_dir}}/{{system_name}}')) {
         New-Item -Path '{{backup_dir}}/{{system_name}}' -ItemType Directory -Force | Out-Null
     }
     & {{scripts_dir}}/Invoke-Backup.ps1 -SystemType '{{system_name}}' -BackupPath '{{backup_dir}}/{{system_name}}' -Verbose
@@ -133,9 +133,9 @@ backup system_name="all":
 network-eval level="basic":
     #!{{shebang}}
     Write-Host 'Running network security analysis at {{level}} level...' -ForegroundColor Green
-    if ('{{level}}' -eq 'basic') { 
+    if ('{{level}}' -eq 'basic') {
         & {{scripts_dir}}/Invoke-NetworkSecurityAnalysis.ps1 -DetailLevel Basic
-    } else { 
+    } else {
         & {{scripts_dir}}/Invoke-NetworkSecurityAnalysis.ps1 -DetailLevel Detailed
     }
 
@@ -143,7 +143,7 @@ network-eval level="basic":
 install-tools install_dir="C:\\SecurityTools" source_dir="":
     #!{{shebang}}
     $Params = @{ InstallDir = '{{install_dir}}' }
-    if ('{{source_dir}}' -ne '') { 
+    if ('{{source_dir}}' -ne '') {
         $Params.Add('SourceDir', '{{source_dir}}')
     }
     Write-Host 'Installing security tools to {{install_dir}}...' -ForegroundColor Green
@@ -165,11 +165,11 @@ status:
     Get-NetTCPConnection -State Listen | Select-Object -First 10 | Format-Table -AutoSize
     Write-Host '---' -ForegroundColor Cyan
     Write-Host 'Recent logon attempts:' -ForegroundColor Green
-    try { 
-        Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 5 | 
-            Select-Object TimeCreated, @{N='User';E={$_.Properties[5].Value}}, @{N='Source';E={$_.Properties[13].Value}} | 
+    try {
+        Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 5 |
+            Select-Object TimeCreated, @{N='User';E={$_.Properties[5].Value}}, @{N='Source';E={$_.Properties[13].Value}} |
             Format-Table -AutoSize
-    } catch { 
+    } catch {
         Write-Host 'No recent failed logon attempts or unable to access security log.' -ForegroundColor Yellow
     }
 
@@ -179,18 +179,18 @@ rotate-passwords output_file="{{base_dir}}/passwords.csv":
     $ErrorActionPreference = 'Continue'
     $VerbosePreference = 'Continue'
     $ntdsRegPath = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NTDS\\Parameters'
-    if (Test-Path $ntdsRegPath) { 
+    if (Test-Path $ntdsRegPath) {
         Write-Host 'This machine is a Domain Controller' -ForegroundColor Green
         Write-Host 'Starting password rotation process...' -ForegroundColor Cyan
-        
+
         # Use absolute paths and ensure folders exist
         $outputPath = "$(Resolve-Path '{{base_dir}}' -ErrorAction Stop)/passwords.csv"
-        
+
         # Call script with proper parameters
         & {{scripts_dir}}/Rotate-Passwords.ps1 -OutputFile $outputPath -Verbose *>&1 | ForEach-Object {
             Write-Host $_
         }
-        
+
         # Check output
         if (Test-Path $outputPath) {
             Write-Host "Password rotation completed successfully" -ForegroundColor Green
@@ -198,7 +198,7 @@ rotate-passwords output_file="{{base_dir}}/passwords.csv":
         } else {
             Write-Host "Password rotation completed but no output file was created" -ForegroundColor Red
         }
-    } else { 
+    } else {
         Write-Host 'This machine is NOT a Domain Controller' -ForegroundColor Red
         Write-Host 'Password rotation can only be performed on a Domain Controller.' -ForegroundColor Yellow
         exit 1
@@ -223,8 +223,8 @@ audit mode="Audit" list="" filter="":
     $reportPath = '{{log_dir}}/HardeningKitty_' + $timestamp + '.csv'
     $logPath = '{{log_dir}}/HardeningKitty_' + $timestamp + '.log'
     Write-Host 'Running HardeningKitty security audit in {{mode}} mode...' -ForegroundColor Green
-    try { 
-        $params = @{ 
+    try {
+        $params = @{
             Mode = '{{mode}}'
             Report = $true
             ReportFile = $reportPath
@@ -232,17 +232,17 @@ audit mode="Audit" list="" filter="":
             LogFile = $logPath
             EmojiSupport = $true
         }
-        if ('{{list}}' -ne '') { 
+        if ('{{list}}' -ne '') {
             $findingListPath = '{{list}}'
-            if (Test-Path '{{list}}') { 
+            if (Test-Path '{{list}}') {
                 Write-Host ('Using custom finding list: ' + $findingListPath) -ForegroundColor Yellow
                 $params.Add('FileFindingList', $findingListPath)
-            } else { 
+            } else {
                 Write-Host ('Using {{list}} benchmark') -ForegroundColor Yellow
                 $params.Add('BenchmarkName', '{{list}}')
-            } 
+            }
         }
-        if ('{{filter}}' -ne '') { 
+        if ('{{filter}}' -ne '') {
             $filterScriptBlock = [ScriptBlock]::Create('{{filter}}')
             Write-Host ('Applying filter: {{filter}}') -ForegroundColor Yellow
             $params.Add('Filter', $filterScriptBlock)
@@ -251,7 +251,7 @@ audit mode="Audit" list="" filter="":
         Write-Host 'Security audit complete.' -ForegroundColor Green
         Write-Host ('Report saved to: ' + $reportPath) -ForegroundColor Green
         Write-Host ('Log saved to: ' + $logPath) -ForegroundColor Green
-        if (Test-Path $reportPath) { 
+        if (Test-Path $reportPath) {
             $report = Import-Csv -Path $reportPath
             $totalChecks = $report.Count
             $failed = ($report | Where-Object { $_.Result -eq 'Fail' } | Measure-Object).Count
@@ -264,11 +264,11 @@ audit mode="Audit" list="" filter="":
             Write-Host ('Passed: ' + $pass) -ForegroundColor Green
             Write-Host ('Warnings: ' + $warning) -ForegroundColor Yellow
             Write-Host ('Failed: ' + $failed) -ForegroundColor Red
-            if ($otherCount -gt 0) { 
+            if ($otherCount -gt 0) {
                 Write-Host ('Other/Unknown: ' + $otherCount) -ForegroundColor Gray
-            } 
-        } 
-    } catch { 
+            }
+        }
+    } catch {
         Write-Host ('Error running HardeningKitty: ' + $_) -ForegroundColor Red
         Write-Host 'Make sure HardeningKitty is installed. Run install-tools first.' -ForegroundColor Yellow
         exit 1
@@ -279,9 +279,10 @@ ps-version:
     #!{{shebang}}
     $PSV = $PSVersionTable.PSVersion | ForEach-Object {"$_" -split "\."}
     $psver = $PSV[0] + "." + $PSV[1]
-    if ($PSV[2].Length -lt 4) { 
+    if ($PSV[2].Length -lt 4) {
         $psver += "." + $PSV[2] + " Core"
-    } else { 
+    } else {
         $psver += " Desktop"
     }
     Write-Host "PowerShell $psver" -ForegroundColor Cyan
+
