@@ -1,11 +1,12 @@
 base_dir := "/opt/keyboard_kowboys"
 scripts_dir := base_dir + "/scripts"
 ops_dir := base_dir + "/ops"
+playbooks_dir := base_dir + "/playbooks"
+single-node_dir := base_dir + "/single-node"
 backup_dir := base_dir + "/backups"
 tools_dir := base_dir + "/tools"
 config_dir := base_dir + "/configs"
 log_dir := base_dir + "/logs"
-
 # Display available commands with descriptions
 default:
     @just --list
