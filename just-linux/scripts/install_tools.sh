@@ -17,20 +17,8 @@ is_root() {
 
 # Function to run commands with elevated privileges if needed
 run_privileged() {
-    if is_root; then
-        # Already root, run command directly
-        "$@"
-    elif command -v sudo >/dev/null 2>&1; then
-        # Use sudo if available
-        sudo "$@"
-    elif command -v doas >/dev/null 2>&1; then
-        # Try doas as an alternative to sudo
-        doas "$@"
-    else
-        echo "Warning: Neither running as root nor found sudo/doas"
-        echo "Attempting to run command directly, may fail if privileges required"
-        "$@"
-    fi
+    # Script should be run as root - just execute directly
+    "$@"
 }
 
 # Function to check if a command exists
@@ -223,6 +211,10 @@ create_flake() {
         packageNames = [
           "git"
           "nmap"
+          "bash"
+          "openssh"
+          "sshpass"
+          "fail2ban"
           "fd"
           "ripgrep"
           "lynis"

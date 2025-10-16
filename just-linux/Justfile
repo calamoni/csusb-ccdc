@@ -40,8 +40,10 @@ help recipe="":
             "backup")
                 echo ""
                 echo "AVAILABLE BACKUP TYPES:"
-                echo "  all        - Backup all system configurations"
-                echo "  network    - Only network-related configurations (/etc/hosts, /etc/resolv.conf, etc.)"
+                echo "  all        - Backup all system configurations (includes security)"
+                echo "  security   - Security-critical files (STIG compliance: PAM, SSH, sudo, SELinux, etc.)"
+                echo "  audit      - Audit logs and compliance data"
+                echo "  network    - Network-related configurations (/etc/hosts, /etc/resolv.conf, etc.)"
                 echo "  firewall   - Firewall rules and configurations"
                 echo "  services   - Service definitions and configurations"
                 echo "  database   - Database configurations and schemas"
@@ -81,7 +83,9 @@ help recipe="":
         echo "EXAMPLES:"
         case "{{recipe}}" in
             "backup")
-                echo "  just backup              # Backup all systems"
+                echo "  just backup              # Backup all systems (includes security)"
+                echo "  just backup security     # Backup security-critical files (STIG)"
+                echo "  just backup audit        # Backup audit logs and compliance data"
                 echo "  just backup network      # Backup only network configs"
                 echo "  just backup database     # Backup database configs"
                 ;;
@@ -106,18 +110,74 @@ help recipe="":
         esac
     fi
 
-# Initialize directory structure (run once or after reset)
-# 
-# Creates the basic directory structure for keyboard_kowboys operations.
-# This should be run after a fresh install or after a reset.
-# 
-# Usage: just init
-init:
+# Start real-time file monitoring
+#
+# Starts the monitor.sh script in the background to watch critical system files.
+# Monitors cron, user accounts, sudo, SSH keys, and other security-sensitive files.
+# Useful for detecting unauthorized changes in real-time.
+#
+# Usage: just start-monitor
+start-monitor:
     #!/bin/sh
-    echo "setting up keyboard kowboys operation environment..."
-    mkdir -p {{base_dir}} {{scripts_dir}} {{ops_dir}} {{backup_dir}} {{tools_dir}} {{config_dir}} {{log_dir}}
-    chmod -R 750 {{base_dir}}
-    echo "directory structure created at {{base_dir}}"
+    echo "Starting real-time file monitoring..."
+    nohup {{scripts_dir}}/monitor.sh > {{log_dir}}/monitor.log 2>&1 &
+    echo "Monitor started. Logs: {{log_dir}}/monitor.log"
+    echo "Use 'just monitor-status' to check status"
+    echo "Use 'just stop-monitor' to stop monitoring"
+
+# Stop real-time file monitoring
+#
+# Stops the background monitor.sh process.
+# Use this to halt real-time file monitoring when no longer needed.
+#
+# Usage: just stop-monitor
+stop-monitor:
+    #!/bin/sh
+    echo "Stopping real-time file monitoring..."
+
+    # Kill the main monitor.sh process and all its children
+    if pgrep -f "{{scripts_dir}}/monitor.sh" >/dev/null; then
+        # Get all PIDs of monitor.sh processes
+        MONITOR_PIDS=$(pgrep -f "{{scripts_dir}}/monitor.sh")
+
+        # Kill all inotifywait processes spawned by monitor.sh
+        pkill -P $MONITOR_PIDS 2>/dev/null || true
+
+        # Kill monitor.sh processes themselves
+        pkill -f "{{scripts_dir}}/monitor.sh"
+
+        # Give it a moment to clean up
+        sleep 1
+
+        # Force kill any remaining processes
+        pkill -9 -f "{{scripts_dir}}/monitor.sh" 2>/dev/null || true
+
+        # Kill any orphaned inotifywait processes
+        pkill -9 inotifywait 2>/dev/null || true
+
+        echo "Monitor stopped successfully"
+    else
+        echo "Monitor was not running"
+    fi
+
+# Check monitoring status
+#
+# Shows whether the real-time file monitoring is currently active.
+# Displays process status and log file location.
+#
+# Usage: just monitor-status
+monitor-status:
+    #!/bin/sh
+    echo "=== MONITOR STATUS ==="
+    if pgrep -f monitor.sh >/dev/null; then
+        echo "Status: RUNNING"
+        echo "Process ID: $(pgrep -f monitor.sh)"
+        echo "Log file: {{log_dir}}/monitor.log"
+        echo "Started: $(ps -o lstart= -p $(pgrep -f monitor.sh) 2>/dev/null || echo 'Unknown')"
+    else
+        echo "Status: STOPPED"
+        echo "Use 'just start-monitor' to begin monitoring"
+    fi
 
 # Run baseline hardening using chimera
 # 
@@ -128,6 +188,16 @@ init:
 harden:
     cd {{ops_dir}} && ./chimera baseline
 
+# Run inventory using chimera
+#
+# Gathers system inventory information using the chimera tool.
+# Useful for asset management and compliance reporting.
+#
+# Usage: just inventory
+inventory:
+    cd {{ops_dir}} && ./chimera inventory
+    mv /tmp/output/inventory.json {{log_dir}}/inventory-$(date +%Y%m%d-%H%M%S).json
+
 # Back up critical system files
 # 
 # Creates a backup of system configurations based on the specified system name.
@@ -136,7 +206,7 @@ harden:
 # 
 # Options:
 #   system_name - Type of system to back up (default: "all")
-#                 Valid options: all, network, firewall, services, database, web, custom
+#                 Valid options: all, security, audit, network, firewall, services, database, web, custom
 #
 # Advanced options (can be set in config file):
 #   - Compression level (1-9)
@@ -146,8 +216,10 @@ harden:
 #   - File/directory exclusion patterns
 #   - Alternative backup methods (tar, rsync, duplicity)
 # 
-# Usage: 
-#   just backup              # Back up all configurations
+# Usage:
+#   just backup              # Back up all configurations (includes security)
+#   just backup security     # Back up security-critical files (STIG compliance)
+#   just backup audit        # Back up audit logs and compliance data
 #   just backup network      # Back up only network configurations
 #   just backup firewall     # Back up only firewall settings
 #   just backup database     # Back up database configurations
@@ -201,6 +273,55 @@ backup system_name="all":
     
     echo "Backup complete. See {{log_dir}}/backup.log for details."
     echo "Network connection snapshot saved to $CONNECTION_FILE"
+
+# Create named backup snapshot for easy reference
+#
+# Creates a timestamped backup with a custom name for easy identification.
+# Useful for creating known-good snapshots before making changes.
+#
+# The snapshot name is appended to the standard backup directory name.
+# Example: "pre-comp" creates backup named "all-hostname-20251016-120000-pre-comp"
+#
+# Usage:
+#   just backup-snapshot pre-comp           # Before competition starts
+#   just backup-snapshot known-good         # Known-good baseline
+#   just backup-snapshot before-hardening   # Before applying hardening
+backup-snapshot name:
+    #!/bin/sh
+    # Export environment variables
+    export KK_BASE_DIR="{{base_dir}}"
+    export KK_CONFIG_DIR="{{config_dir}}"
+    export KK_LOG_DIR="{{log_dir}}"
+    export KK_BACKUP_DIR="{{backup_dir}}"
+    export KK_SCRIPTS_DIR="{{scripts_dir}}"
+
+    {{scripts_dir}}/backup_snapshot.sh "{{name}}"
+
+# Quick restore from backup (no safety checks)
+#
+# Rapidly restores a system component from backup.
+# NO safety snapshots, NO verification - just fast restore.
+# USER is responsible for safety - use with caution!
+#
+# Options:
+#   type - Component to restore (network, firewall, services, ssh, web, database, all)
+#   date - Backup date or named snapshot (default: latest)
+#
+# WARNING: This directly overwrites system files and restarts services.
+# Ensure you have console access before restoring network/SSH configurations.
+#
+# Usage:
+#   just restore-quick network              # Restore from latest network backup
+#   just restore-quick firewall 20251016    # Restore from specific date
+#   just restore-quick all known-good       # Restore from named snapshot
+restore-quick type date="latest":
+    #!/bin/sh
+    # Export environment variables
+    export KK_BASE_DIR="{{base_dir}}"
+    export KK_BACKUP_DIR="{{backup_dir}}"
+
+    {{scripts_dir}}/restore_quick.sh "{{type}}" "{{date}}"
+
 # Compare current system state against last backup
 # 
 # Compares the current system state with a previous backup to identify changes.
@@ -291,13 +412,57 @@ diff-services:
     @just diff services
 
 # Check for new installed packages
-# 
+#
 # Compares the currently installed packages with the last backup.
 # Useful for detecting unauthorized software installations.
-# 
+#
 # Usage: just diff-packages
 diff-packages:
     @just diff packages
+
+# Check for persistence mechanisms and backdoors
+#
+# Scans the system for common persistence mechanisms used by attackers:
+#   - Suspicious cron jobs
+#   - New/modified systemd services and timers
+#   - Changes to rc.local and init scripts
+#   - Backdoors in shell profiles (.bashrc, .profile, etc.)
+#   - LD_PRELOAD hijacking
+#   - New kernel modules
+#   - Modified SSH authorized_keys
+#   - Unusual SUID/SGID binaries
+#
+# Options:
+#   -v, --verbose     Enable verbose output
+#   -c, --cron        Check cron jobs only
+#   -s, --systemd     Check systemd services only
+#   -i, --init        Check init scripts only
+#   -p, --profiles    Check shell profiles only
+#   -l, --ld-preload  Check LD_PRELOAD only
+#   -k, --kernel      Check kernel modules only
+#   --ssh             Check SSH keys only
+#   --suid            Check SUID/SGID files only
+#
+# Usage:
+#   just check-persistence              # Run all checks
+#   just check-persistence -v           # Run with verbose output
+#   just check-persistence --cron --ssh # Check only cron and SSH
+check-persistence *args="":
+    #!/bin/sh
+    # Check for root privileges if needed for full system scan
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "WARNING: Running without root privileges. Some checks may be incomplete."
+        echo "For complete results, run as root"
+        echo ""
+    fi
+
+    # Export environment variables
+    export KK_BASE_DIR="{{base_dir}}"
+    export KK_LOG_DIR="{{log_dir}}"
+    export KK_BACKUP_DIR="{{backup_dir}}"
+
+    # Run the persistence check script
+    {{scripts_dir}}/check_persistence.sh {{args}}
 
 # Compare specific files with previous backup
 # 
@@ -350,6 +515,151 @@ network-eval level="basic":
 # Usage: just deploy-monitoring
 deploy-monitoring:
     @{{scripts_dir}}/deploy_monitoring.sh
+
+# Start system performance monitoring
+#
+# Starts background monitoring of CPU, memory, disk, and network usage.
+# Useful for detecting resource exhaustion attacks and performance issues.
+#
+# Usage: just start-performance-monitor
+start-performance-monitor:
+    #!/bin/sh
+    echo "Starting system performance monitoring..."
+    nohup {{scripts_dir}}/run_monitoring.sh > {{log_dir}}/performance-monitor.log 2>&1 &
+    echo "Performance monitoring started. Logs: {{log_dir}}/performance-monitor.log"
+    echo "Data directory: {{log_dir}}/monitoring/data/"
+
+# Stop system performance monitoring
+#
+# Stops the background performance monitoring process.
+#
+# Usage: just stop-performance-monitor
+stop-performance-monitor:
+    #!/bin/sh
+    echo "Stopping system performance monitoring..."
+    if pkill -f run_monitoring.sh; then
+        echo "Performance monitoring stopped successfully"
+    else
+        echo "Performance monitoring was not running"
+    fi
+
+# Check performance monitoring status
+#
+# Shows whether system performance monitoring is currently active.
+#
+# Usage: just performance-monitor-status
+performance-monitor-status:
+    #!/bin/sh
+    echo "=== PERFORMANCE MONITOR STATUS ==="
+    if pgrep -f run_monitoring.sh >/dev/null; then
+        echo "Status: RUNNING"
+        echo "Process ID: $(pgrep -f run_monitoring.sh)"
+        echo "Log file: {{log_dir}}/performance-monitor.log"
+        echo "Data directory: {{log_dir}}/monitoring/data/"
+        echo "Started: $(ps -o lstart= -p $(pgrep -f run_monitoring.sh) 2>/dev/null || echo 'Unknown')"
+    else
+        echo "Status: STOPPED"
+        echo "Use 'just start-performance-monitor' to begin monitoring"
+    fi
+
+# Show monitoring dashboard
+#
+# Displays a comprehensive monitoring dashboard with system status,
+# monitoring status, recent alerts, and critical file information.
+#
+# Usage: just monitor-dashboard 
+monitor-dashboard:
+    #!/bin/sh
+    {{scripts_dir}}/monitor_dashboard.sh
+
+# Watch monitoring dashboard
+#
+# Continuously displays the monitoring dashboard with automatic refresh.
+# Default interval is 5 seconds.
+#
+# Usage: just watch-monitor [interval]
+watch-monitor interval="5":
+    #!/bin/sh
+    {{scripts_dir}}/monitor_dashboard.sh --watch {{interval}}
+
+# Analyze monitoring threats
+#
+# Analyzes monitoring logs to identify potential security threats
+# and suspicious activities.
+#
+# Usage: just analyze-threats
+analyze-threats:
+    #!/bin/sh
+    echo "=== THREAT ANALYSIS REPORT ==="
+    echo "Generated: $(date)"
+    echo ""
+    
+    # Check for user account changes
+    echo "=== USER ACCOUNT CHANGES ==="
+    if [ -f "{{log_dir}}/monitor.log" ]; then
+        echo "Passwd file modifications:"
+        grep -E "passwd.*modify|passwd.*create|passwd.*delete" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "  No passwd file changes detected"
+        
+        echo ""
+        echo "Shadow file access:"
+        grep -E "shadow.*open" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "  No shadow file access detected"
+        
+        echo ""
+        echo "Group file modifications:"
+        grep -E "group.*modify|group.*create|group.*delete" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "  No group file changes detected"
+    else
+        echo "No monitoring log found"
+    fi
+    
+    echo ""
+    echo "=== SUSPICIOUS FILE CHANGES ==="
+    if [ -f "{{log_dir}}/monitor.log" ]; then
+        grep -E "(sudoers|ssh)" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "No suspicious file changes found"
+    else
+        echo "No monitoring log found"
+    fi
+    
+    echo ""
+    echo "=== PRIVILEGE ESCALATION ATTEMPTS ==="
+    if [ -f "{{log_dir}}/monitor.log" ]; then
+        grep -E "(sudo|su|chmod|chown)" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "No privilege escalation attempts detected"
+    else
+        echo "No monitoring log found"
+    fi
+    
+    echo ""
+    echo "=== CRON/SCHEDULED TASK CHANGES ==="
+    if [ -f "{{log_dir}}/monitor.log" ]; then
+        grep -E "(cron|crontab)" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "No cron changes detected"
+    else
+        echo "No monitoring log found"
+    fi
+    
+    echo ""
+    echo "=== WEB DEFACEMENT ATTEMPTS ==="
+    if [ -f "{{log_dir}}/monitor.log" ]; then
+        grep -E "www.*modify|www.*create|www.*delete" "{{log_dir}}/monitor.log" 2>/dev/null | tail -10 || echo "No web root changes detected"
+    else
+        echo "No monitoring log found"
+    fi
+    
+    echo ""
+    echo "=== NETWORK ANOMALIES ==="
+    if [ -d "{{log_dir}}/monitoring/data" ]; then
+        grep -E "(LISTEN|ESTABLISHED)" "{{log_dir}}/monitoring/data/network_"*.log 2>/dev/null | tail -10 || echo "No network anomalies detected"
+    else
+        echo "No network monitoring data found"
+    fi
+    
+    echo ""
+    echo "=== CRITICAL ALERTS SUMMARY ==="
+    if [ -f "{{log_dir}}/monitor.log" ]; then
+        grep -c "CRITICAL" "{{log_dir}}/monitor.log" 2>/dev/null | awk '{print "Critical alerts: " $1}' || echo "Critical alerts: 0"
+        grep -c "WARNING" "{{log_dir}}/monitor.log" 2>/dev/null | awk '{print "Warning alerts: " $1}' || echo "Warning alerts: 0"
+        grep -c "INFO" "{{log_dir}}/monitor.log" 2>/dev/null | awk '{print "Info alerts: " $1}' || echo "Info alerts: 0"
+    else
+        echo "No monitoring log found"
+    fi
 
 # Verify service integrity
 # 

@@ -3,3 +3,4 @@ installsysmon.txt
 ansible-playbooks/linux/.vscode/settings.json
 .vscode/settings.json
 .gitignore
+just-linux/docs/*
