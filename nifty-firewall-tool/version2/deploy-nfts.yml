@@ -1,0 +1,44 @@
+---
+- name: Deploy NonFungibleTables
+  hosts: all
+  become: true
+  vars_files:
+    - nfts.yml
+  vars:
+    container_name: "nonfungibletwobles"
+    image_name: "l3m0n42/nonfungibletwobles:latest"
+  tasks:
+    - name: Pull the Docker image
+      ansible.builtin.shell: >
+        docker pull {{ image_name }}
+      register: pull_result
+      changed_when: "'Downloaded' in pull_result.stdout or 'Pulling' in pull_result.stdout"
+
+    - name: Stop and remove existing container (if running)
+      ansible.builtin.shell: >
+        docker rm -f {{ container_name }}
+      register: remove_result
+      ignore_errors: true
+      changed_when: "'Deleted' in remove_result.stdout or 'removed' in remove_result.stdout"
+
+    - name: Run the Docker container
+      ansible.builtin.shell: >
+        docker run -d
+        --name {{ container_name }}
+        --cap-add NET_ADMIN
+        --network host
+        --restart unless-stopped
+        -e API_KEY={{ API_KEY }}
+        {{ image_name }}
+      register: run_result
+      changed_when: "'Running' in run_result.stdout or 'Started' in run_result.stdout"
+
+    - name: Verify the container is running
+      ansible.builtin.shell: >
+        docker ps --filter "name={{ container_name }}" --format "{{ '{{.Names}}' }}"
+      register: container_status
+      failed_when: "'{{ container_name }}' not in container_status.stdout"
+
+    - name: Debug deployment status
+      debug:
+        msg: "Container {{ container_name }} deployed successfully with API_KEY."

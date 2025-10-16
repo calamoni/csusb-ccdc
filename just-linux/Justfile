@@ -7,7 +7,6 @@ backup_dir := base_dir + "/backups"
 tools_dir := base_dir + "/tools"
 config_dir := base_dir + "/configs"
 log_dir := base_dir + "/logs"
-
 # Display available commands with descriptions
 default:
     @just --list
@@ -804,7 +803,7 @@ find-pii:
     
     {{scripts_dir}}/find_pii.sh
 
-# Usage: just remote all|hostname|ip
+# Usage: just remote (help|install|just recipe) all|hostname|ip
 remote action="help" target="all":
     #!/bin/sh
 
@@ -889,71 +888,6 @@ add-agent server_ip="":
         echo "Refer to the list of hosts using 'just show hosts'"
         exit 1
     fi
-
-# Usage just install-docker
-install-docker:
-    #!/bin/sh
-    echo "=== Keyboard Kowboys install-docker ==="
-    {{scripts_dir}}/docker-static.sh
-
-# Import domain users to local accounts
-#
-# Creates local copies of domain users to maintain access when domain is down.
-# Useful for maintaining system access during domain controller outages.
-# Requires a CSV file with username,password format.
-#
-# Format: username,password (one user per line, first line should be header)
-#
-# Usage: just import-users <csv_file>
-import-users csv_file:
-    #!/bin/sh
-    echo "=== Keyboard Kowboys import-users ==="
-    if [ ! -f "{{csv_file}}" ]; then
-        echo "ERROR: CSV file not found: {{csv_file}}"
-        echo ""
-        echo "Usage: just import-users <csv_file>"
-        echo ""
-        echo "CSV Format:"
-        echo "  username,password"
-        echo "  user1,pass123"
-        echo "  user2,pass456"
-        exit 1
-    fi
-
-    if [ "$(id -u)" -ne 0 ]; then
-        echo "ERROR: Root privileges required for user management"
-        exit 1
-    fi
-
-    {{scripts_dir}}/import_users.sh "{{csv_file}}"
-    echo "User import complete. Backup created in /root/user_management_backup_*"
-
-# Emergency service shutdown
-#
-# Stops, disables, and masks a service to prevent it from running.
-# Works with systemd, init.d, and BSD-style service management.
-# Useful during incident response when a service is compromised.
-#
-# Automatically saves the last 100 log entries for the service before shutdown.
-#
-# Usage: just service-kill <service_name>
-service-kill service:
-    #!/bin/sh
-    # Export environment variables
-    export KK_BASE_DIR="{{base_dir}}"
-    export KK_LOG_DIR="{{log_dir}}"
-
-    {{scripts_dir}}/service_kill.sh "{{service}}"
-
-# Restore a killed service
-#
-# Unmasks, enables, and starts a service that was previously killed.
-# Works with systemd, init.d, and BSD-style service management.
-#
-# Usage: just service-restore <service_name>
-service-restore service:
-    #!/bin/sh
-    {{scripts_dir}}/service_restore.sh "{{service}}"
 
 
 # Display system status dashboard
