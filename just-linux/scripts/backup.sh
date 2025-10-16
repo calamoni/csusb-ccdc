@@ -16,6 +16,17 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to check if running on BusyBox
+is_busybox() {
+    if command_exists busybox; then
+        # Check if the system is primarily BusyBox
+        if busybox 2>/dev/null | head -1 | grep -q "BusyBox"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # Function to check if running as root
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
@@ -33,11 +44,13 @@ Usage: $0 [OPTIONS] <system_name> <backup_directory>
 
 Systems:
   all           Backup all system configurations
+  security      Backup security-critical files (STIG compliance)
   network       Backup network configurations
   firewall      Backup firewall rules
   services      Backup service configurations
   database      Backup database (MySQL/PostgreSQL)
   web           Backup web server configurations
+  audit         Backup audit logs and compliance data
   custom        Custom backup defined in configuration file
 
 Options:
@@ -112,7 +125,110 @@ get_source_dirs() {
     
     case "$system" in
         "all")
-            source_dirs="/etc /home/*/.??* /var/spool/cron"
+            # CCDC-focused backup: only critical files, not entire home directories
+            # User shell configs for persistence detection
+            source_dirs="/etc /var/spool/cron /var/log/audit /root/.ssh"
+
+            # Add user SSH keys and shell profiles (not all dotfiles)
+            if [ -d "/home" ]; then
+                for user_home in /home/*; do
+                    if [ -d "$user_home" ]; then
+                        # SSH keys (persistence/incident response)
+                        if [ -d "$user_home/.ssh" ]; then
+                            source_dirs="$source_dirs $user_home/.ssh"
+                        fi
+                        # Shell profiles (persistence detection)
+                        if [ -f "$user_home/.bashrc" ]; then
+                            source_dirs="$source_dirs $user_home/.bashrc"
+                        fi
+                        if [ -f "$user_home/.bash_profile" ]; then
+                            source_dirs="$source_dirs $user_home/.bash_profile"
+                        fi
+                        if [ -f "$user_home/.profile" ]; then
+                            source_dirs="$source_dirs $user_home/.profile"
+                        fi
+                        if [ -f "$user_home/.zshrc" ]; then
+                            source_dirs="$source_dirs $user_home/.zshrc"
+                        fi
+                    fi
+                done
+            fi
+            ;;
+        "security")
+            # STIG and security-critical files
+            # Note: Logging moved outside this function to avoid capturing log output as source_dirs
+
+            # Authentication and authorization
+            if [ -f "/etc/passwd" ]; then source_dirs="$source_dirs /etc/passwd"; fi
+            if [ -f "/etc/shadow" ]; then source_dirs="$source_dirs /etc/shadow"; fi
+            if [ -f "/etc/group" ]; then source_dirs="$source_dirs /etc/group"; fi
+            if [ -f "/etc/gshadow" ]; then source_dirs="$source_dirs /etc/gshadow"; fi
+            if [ -f "/etc/security/opasswd" ]; then source_dirs="$source_dirs /etc/security/opasswd"; fi
+
+            # PAM configuration
+            if [ -d "/etc/pam.d" ]; then source_dirs="$source_dirs /etc/pam.d"; fi
+            if [ -d "/etc/security" ]; then source_dirs="$source_dirs /etc/security"; fi
+
+            # SSH configuration
+            if [ -d "/etc/ssh" ]; then source_dirs="$source_dirs /etc/ssh"; fi
+            if [ -d "/root/.ssh" ]; then source_dirs="$source_dirs /root/.ssh"; fi
+
+            # Sudo configuration
+            if [ -f "/etc/sudoers" ]; then source_dirs="$source_dirs /etc/sudoers"; fi
+            if [ -d "/etc/sudoers.d" ]; then source_dirs="$source_dirs /etc/sudoers.d"; fi
+
+            # SELinux configuration
+            if [ -d "/etc/selinux" ]; then source_dirs="$source_dirs /etc/selinux"; fi
+
+            # AppArmor configuration
+            if [ -d "/etc/apparmor.d" ]; then source_dirs="$source_dirs /etc/apparmor.d"; fi
+            if [ -d "/etc/apparmor" ]; then source_dirs="$source_dirs /etc/apparmor"; fi
+
+            # Audit configuration
+            if [ -d "/etc/audit" ]; then source_dirs="$source_dirs /etc/audit"; fi
+            if [ -d "/etc/audisp" ]; then source_dirs="$source_dirs /etc/audisp"; fi
+
+            # Login/session configuration
+            if [ -f "/etc/login.defs" ]; then source_dirs="$source_dirs /etc/login.defs"; fi
+            if [ -f "/etc/securetty" ]; then source_dirs="$source_dirs /etc/securetty"; fi
+            if [ -d "/etc/profile.d" ]; then source_dirs="$source_dirs /etc/profile.d"; fi
+            if [ -f "/etc/profile" ]; then source_dirs="$source_dirs /etc/profile"; fi
+            if [ -f "/etc/bashrc" ]; then source_dirs="$source_dirs /etc/bashrc"; fi
+            if [ -f "/etc/bash.bashrc" ]; then source_dirs="$source_dirs /etc/bash.bashrc"; fi
+
+            # System integrity tools
+            if [ -d "/etc/aide" ]; then source_dirs="$source_dirs /etc/aide"; fi
+            if [ -d "/etc/tripwire" ]; then source_dirs="$source_dirs /etc/tripwire"; fi
+
+            # CA certificates and crypto
+            if [ -d "/etc/pki" ]; then source_dirs="$source_dirs /etc/pki"; fi
+            if [ -d "/etc/ssl" ]; then source_dirs="$source_dirs /etc/ssl"; fi
+            if [ -d "/usr/local/share/ca-certificates" ]; then source_dirs="$source_dirs /usr/local/share/ca-certificates"; fi
+
+            # Trim leading space
+            source_dirs=$(echo "$source_dirs" | sed 's/^ //')
+            ;;
+        "audit")
+            # Audit logs and compliance data
+            # Note: Logging moved outside this function to avoid capturing log output as source_dirs
+
+            # Audit logs
+            if [ -d "/var/log/audit" ]; then source_dirs="$source_dirs /var/log/audit"; fi
+
+            # System logs
+            if [ -f "/var/log/auth.log" ]; then source_dirs="$source_dirs /var/log/auth.log"; fi
+            if [ -f "/var/log/secure" ]; then source_dirs="$source_dirs /var/log/secure"; fi
+            if [ -f "/var/log/messages" ]; then source_dirs="$source_dirs /var/log/messages"; fi
+            if [ -f "/var/log/syslog" ]; then source_dirs="$source_dirs /var/log/syslog"; fi
+
+            # Failed login attempts
+            if [ -f "/var/log/faillog" ]; then source_dirs="$source_dirs /var/log/faillog"; fi
+            if [ -f "/var/log/btmp" ]; then source_dirs="$source_dirs /var/log/btmp"; fi
+            if [ -f "/var/log/wtmp" ]; then source_dirs="$source_dirs /var/log/wtmp"; fi
+            if [ -f "/var/log/lastlog" ]; then source_dirs="$source_dirs /var/log/lastlog"; fi
+
+            # Trim leading space
+            source_dirs=$(echo "$source_dirs" | sed 's/^ //')
             ;;
         "network")
             # Check for files/directories before adding them
@@ -141,7 +257,9 @@ get_source_dirs() {
             source_dirs="/etc/systemd /etc/init.d /etc/init /etc/cron* /etc/logrotate.d"
             ;;
         "database")
-            source_dirs="/etc/mysql /etc/postgresql /var/lib/mysql /var/lib/postgresql"
+            # CCDC: Only config files, not actual database data
+            # Database data can be huge and isn't needed for quick config restore
+            source_dirs="/etc/mysql /etc/postgresql"
             ;;
         "web")
             source_dirs="/etc/apache2 /etc/nginx /etc/php /etc/letsencrypt"
@@ -214,7 +332,16 @@ perform_system_dump() {
     # User information
     log "INFO" "Capturing user information"
     who > "$dump_dir/logged_users.txt"
-    last -n 20 > "$dump_dir/recent_logins.txt"
+
+    # BusyBox-compatible last command (no -n flag support)
+    if is_busybox; then
+        # BusyBox last doesn't support -n, use head instead
+        log "INFO" "Using BusyBox-compatible last command"
+        last 2>/dev/null | head -20 > "$dump_dir/recent_logins.txt" || true
+    else
+        # Full last command supports -n
+        last -n 20 > "$dump_dir/recent_logins.txt" 2>/dev/null || true
+    fi
     
     # Service information
     log "INFO" "Capturing service information"
@@ -227,16 +354,211 @@ perform_system_dump() {
     
     # Package information
     log "INFO" "Capturing package information"
-    if command_exists dpkg; then
-        dpkg --get-selections > "$dump_dir/packages.list"
-    elif command_exists rpm; then
-        rpm -qa | sort > "$dump_dir/packages.list"
-    elif command_exists nix-env; then
-        nix-env -q > "$dump_dir/packages.list"
+
+    has_pkg_manager=false
+    
+    if command_exists apk; then
+        has_pkg_manager=true
+        apk info | sort >> "$snapshot_dir/packages.list"
     fi
+    if command_exists apt; then
+        has_pkg_manager=true
+        apt list --installed 2>/dev/null | sort >> "$snapshot_dir/packages.list"
+    fi
+    if command_exists dpkg; then
+        has_pkg_manager=true
+        dpkg --get-selections >> "$snapshot_dir/packages.list"
+    fi
+    if command_exists rpm; then
+        has_pkg_manager=true
+        rpm -qa | sort >> "$snapshot_dir/packages.list"
+    fi
+    if command_exists nix-env; then
+        has_pkg_manager=true
+        nix-env -q >> "$snapshot_dir/packages.list"
+    fi
+    if [ "$has_pkg_manager" = false ]; then
+        log "ERROR" "No package manager found for package comparison"
+        echo "No package manager tool available" > "$snapshot_dir/packages.list"
+    fi
+
     
     # Additional specialized information based on system type
     case "$system" in
+        "security"|"all")
+            log "INFO" "Capturing security-critical system state"
+
+            # SUID/SGID files list
+            log "INFO" "Finding SUID/SGID binaries"
+            # Use fd if available, fallback to find
+            if command_exists fd; then
+                fd --one-file-system --type f --perm u+s,g+s --exec ls -la > "$dump_dir/suid_sgid_files.txt" 2>/dev/null || true
+            else
+                find / -xdev \( -perm -4000 -o -perm -2000 \) -type f -exec ls -la {} \; > "$dump_dir/suid_sgid_files.txt" 2>/dev/null || true
+            fi
+
+            # World-writable files
+            log "INFO" "Finding world-writable files"
+            if command_exists fd; then
+                fd --one-file-system --type f --perm o+w --exec ls -la > "$dump_dir/world_writable_files.txt" 2>/dev/null || true
+            else
+                find / -xdev -type f -perm -0002 -exec ls -la {} \; > "$dump_dir/world_writable_files.txt" 2>/dev/null || true
+            fi
+
+            # World-writable directories
+            if command_exists fd; then
+                fd --one-file-system --type d --perm o+w --exec ls -lad > "$dump_dir/world_writable_dirs.txt" 2>/dev/null || true
+            else
+                find / -xdev -type d -perm -0002 -exec ls -lad {} \; > "$dump_dir/world_writable_dirs.txt" 2>/dev/null || true
+            fi
+
+            # Files with no owner
+            log "INFO" "Finding files with no owner"
+            if command_exists fd; then
+                fd --one-file-system --no-ignore --owner ':nouser' --exec ls -la > "$dump_dir/unowned_files.txt" 2>/dev/null || true
+            else
+                find / -xdev \( -nouser -o -nogroup \) -exec ls -la {} \; > "$dump_dir/unowned_files.txt" 2>/dev/null || true
+            fi
+
+            # File capabilities
+            if command_exists getcap; then
+                log "INFO" "Capturing file capabilities"
+                getcap -r / 2>/dev/null > "$dump_dir/file_capabilities.txt" || true
+            fi
+
+            # SELinux status and contexts
+            if command_exists getenforce; then
+                log "INFO" "Capturing SELinux status"
+                getenforce > "$dump_dir/selinux_status.txt"
+                if command_exists sestatus; then
+                    sestatus > "$dump_dir/selinux_detailed.txt"
+                fi
+                # SELinux contexts for key files
+                ls -Z /etc/passwd /etc/shadow /etc/ssh/sshd_config > "$dump_dir/selinux_contexts.txt" 2>/dev/null || true
+            fi
+
+            # AppArmor status
+            if command_exists aa-status; then
+                log "INFO" "Capturing AppArmor status"
+                aa-status > "$dump_dir/apparmor_status.txt" 2>/dev/null || true
+            fi
+
+            # Audit daemon status
+            if command_exists auditctl; then
+                log "INFO" "Capturing audit rules"
+                auditctl -l > "$dump_dir/audit_rules.txt" 2>/dev/null || true
+                auditctl -s > "$dump_dir/audit_status.txt" 2>/dev/null || true
+            fi
+
+            # Password policy
+            if [ -f "/etc/login.defs" ]; then
+                grep -E "PASS_MAX_DAYS|PASS_MIN_DAYS|PASS_MIN_LEN|PASS_WARN_AGE" /etc/login.defs > "$dump_dir/password_policy.txt" 2>/dev/null || true
+            fi
+
+            # Failed login attempts
+            if command_exists faillog; then
+                faillog -a > "$dump_dir/failed_logins.txt" 2>/dev/null || true
+            fi
+
+            # Last logins
+            if command_exists lastlog; then
+                lastlog > "$dump_dir/last_logins.txt" 2>/dev/null || true
+            fi
+
+            # Currently logged in users with details
+            w > "$dump_dir/current_users_detailed.txt" 2>/dev/null || true
+
+            # Sudo access
+            log "INFO" "Capturing sudo access configuration"
+            if [ -f "/etc/sudoers" ]; then
+                # Parse sudoers safely
+                grep -v '^#' /etc/sudoers | grep -v '^$' > "$dump_dir/sudoers_active.txt" 2>/dev/null || true
+            fi
+
+            # SSH authorized keys for all users
+            log "INFO" "Collecting SSH authorized keys"
+            # Check root first
+            if [ -f "/root/.ssh/authorized_keys" ]; then
+                echo "=== root ===" >> "$dump_dir/ssh_authorized_keys.txt"
+                cat /root/.ssh/authorized_keys >> "$dump_dir/ssh_authorized_keys.txt" 2>/dev/null || true
+                echo "" >> "$dump_dir/ssh_authorized_keys.txt"
+            fi
+            # Check home directories (BusyBox-compatible)
+            if [ -d "/home" ]; then
+                for user_home in /home/*; do
+                    if [ -d "$user_home" ] && [ -d "$user_home/.ssh" ]; then
+                        username=$(basename "$user_home")
+                        if [ -f "$user_home/.ssh/authorized_keys" ]; then
+                            echo "=== $username ===" >> "$dump_dir/ssh_authorized_keys.txt"
+                            cat "$user_home/.ssh/authorized_keys" >> "$dump_dir/ssh_authorized_keys.txt" 2>/dev/null || true
+                            echo "" >> "$dump_dir/ssh_authorized_keys.txt"
+                        fi
+                    fi
+                done
+            fi
+
+            # Checksums of critical system binaries
+            log "INFO" "Computing checksums of critical binaries"
+            if command_exists sha256sum; then
+                # Use fd if available for better performance
+                if command_exists fd; then
+                    for dir in /bin /sbin /usr/bin /usr/sbin; do
+                        if [ -d "$dir" ]; then
+                            fd --type f --base-directory "$dir" --exec sha256sum 2>/dev/null >> "$dump_dir/binary_checksums.txt" || true
+                        fi
+                    done
+                else
+                    # BusyBox-compatible fallback
+                    for dir in /bin /sbin /usr/bin /usr/sbin; do
+                        if [ -d "$dir" ]; then
+                            find "$dir" -type f 2>/dev/null | while read -r file; do
+                                sha256sum "$file" 2>/dev/null || true
+                            done >> "$dump_dir/binary_checksums.txt"
+                        fi
+                    done
+                fi
+            elif command_exists md5sum; then
+                if command_exists fd; then
+                    for dir in /bin /sbin /usr/bin /usr/sbin; do
+                        if [ -d "$dir" ]; then
+                            fd --type f --base-directory "$dir" --exec md5sum 2>/dev/null >> "$dump_dir/binary_checksums.txt" || true
+                        fi
+                    done
+                else
+                    for dir in /bin /sbin /usr/bin /usr/sbin; do
+                        if [ -d "$dir" ]; then
+                            find "$dir" -type f 2>/dev/null | while read -r file; do
+                                md5sum "$file" 2>/dev/null || true
+                            done >> "$dump_dir/binary_checksums.txt"
+                        fi
+                    done
+                fi
+            fi
+
+            # Loaded kernel modules
+            log "INFO" "Capturing loaded kernel modules"
+            lsmod > "$dump_dir/loaded_modules.txt" 2>/dev/null || true
+
+            # Kernel parameters
+            if command_exists sysctl; then
+                sysctl -a > "$dump_dir/kernel_parameters.txt" 2>/dev/null || true
+            fi
+
+            # File ACLs for critical directories
+            if command_exists getfacl; then
+                log "INFO" "Capturing file ACLs for critical directories"
+                getfacl -R /etc 2>/dev/null > "$dump_dir/etc_acls.txt" || true
+            fi
+
+            # Capture systemd security settings
+            if command_exists systemd-analyze; then
+                log "INFO" "Capturing systemd security analysis"
+                systemd-analyze security > "$dump_dir/systemd_security.txt" 2>/dev/null || true
+            fi
+
+            # For "all" backup, continue to network section
+            # (network section will be processed next in the case statement)
+            ;;
         "network")
             log "INFO" "Capturing additional network information"
             ip addr > "$dump_dir/ip_addr.txt"
@@ -320,11 +642,55 @@ perform_system_dump() {
                     mysql -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SHOW STATUS;" > "$dump_dir/mysql_status.txt"
                 fi
             fi
-            
+
             if command_exists psql; then
                 # Using -U postgres instead of sudo
                 psql -U postgres -c "\l" > "$dump_dir/postgres_databases.txt" 2>/dev/null || true
                 psql -U postgres -c "\du" > "$dump_dir/postgres_users.txt" 2>/dev/null || true
+            fi
+            ;;
+        "audit")
+            log "INFO" "Capturing audit and compliance information"
+
+            # Audit logs analysis
+            if command_exists aureport; then
+                log "INFO" "Generating audit reports"
+                aureport --summary > "$dump_dir/audit_summary.txt" 2>/dev/null || true
+                aureport --auth > "$dump_dir/audit_auth.txt" 2>/dev/null || true
+                aureport --login > "$dump_dir/audit_logins.txt" 2>/dev/null || true
+                aureport --failed > "$dump_dir/audit_failed.txt" 2>/dev/null || true
+            fi
+
+            # Authentication attempts from auth.log
+            if [ -f "/var/log/auth.log" ]; then
+                grep "Failed password" /var/log/auth.log | tail -100 > "$dump_dir/recent_failed_auth.txt" 2>/dev/null || true
+                grep "Accepted password" /var/log/auth.log | tail -100 > "$dump_dir/recent_successful_auth.txt" 2>/dev/null || true
+            elif [ -f "/var/log/secure" ]; then
+                grep "Failed password" /var/log/secure | tail -100 > "$dump_dir/recent_failed_auth.txt" 2>/dev/null || true
+                grep "Accepted password" /var/log/secure | tail -100 > "$dump_dir/recent_successful_auth.txt" 2>/dev/null || true
+            fi
+
+            # Sudo usage
+            if [ -f "/var/log/auth.log" ]; then
+                grep "sudo:" /var/log/auth.log | tail -100 > "$dump_dir/sudo_usage.txt" 2>/dev/null || true
+            elif [ -f "/var/log/secure" ]; then
+                grep "sudo:" /var/log/secure | tail -100 > "$dump_dir/sudo_usage.txt" 2>/dev/null || true
+            fi
+
+            # Login history
+            if is_busybox; then
+                # BusyBox last doesn't support -F or -n flags
+                last 2>/dev/null | head -100 > "$dump_dir/login_history.txt" || true
+            else
+                last -F -n 100 > "$dump_dir/login_history.txt" 2>/dev/null || true
+            fi
+
+            # Failed login history
+            if is_busybox; then
+                # BusyBox lastb doesn't support -F or -n flags
+                lastb 2>/dev/null | head -100 > "$dump_dir/failed_login_history.txt" || true
+            else
+                lastb -F -n 100 > "$dump_dir/failed_login_history.txt" 2>/dev/null || true
             fi
             ;;
     esac
@@ -529,5 +895,50 @@ check_dependencies
 
 # Perform the backup
 perform_backup "$SYSTEM_NAME" "$BACKUP_DIR"
+
+# Verify backup was created
+TIMESTAMP=$(date +%Y%m%d)
+BACKUP_PATH="$BACKUP_DIR/$TIMESTAMP"
+if [ -d "$BACKUP_PATH" ]; then
+    log "INFO" "Backup verification: Backup directory exists at $BACKUP_PATH"
+
+    # Count files in backup
+    if command_exists fd; then
+        FILE_COUNT=$(fd --type f --base-directory "$BACKUP_PATH" 2>/dev/null | wc -l)
+    else
+        FILE_COUNT=$(find "$BACKUP_PATH" -type f 2>/dev/null | wc -l)
+    fi
+    log "INFO" "Backup verification: $FILE_COUNT files backed up"
+
+    # Check backup size
+    BACKUP_SIZE=$(du -sh "$BACKUP_PATH" 2>/dev/null | cut -f1)
+    log "INFO" "Backup verification: Backup size is $BACKUP_SIZE"
+
+    # Verify manifest exists
+    if [ -f "$BACKUP_PATH/manifest.txt" ]; then
+        log "INFO" "Backup verification: Manifest file created successfully"
+    else
+        log "WARNING" "Backup verification: Manifest file missing"
+    fi
+
+    # Verify system_info directory exists
+    if [ -d "$BACKUP_PATH/system_info" ]; then
+        if command_exists fd; then
+            INFO_FILES=$(fd --type f --base-directory "$BACKUP_PATH/system_info" 2>/dev/null | wc -l)
+        else
+            INFO_FILES=$(find "$BACKUP_PATH/system_info" -type f 2>/dev/null | wc -l)
+        fi
+        log "INFO" "Backup verification: $INFO_FILES system info files captured"
+    else
+        log "WARNING" "Backup verification: system_info directory missing"
+    fi
+else
+    log "ERROR" "Backup verification: Backup directory not found at $BACKUP_PATH"
+    exit 1
+fi
+
+log "INFO" "Backup operation completed successfully"
+log "INFO" "Backup location: $BACKUP_PATH"
+log "INFO" "Latest symlink: $BACKUP_DIR/latest"
 
 exit 0

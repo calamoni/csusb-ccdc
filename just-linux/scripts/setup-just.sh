@@ -45,16 +45,21 @@ mkdir -p "$BASE_DIR/scripts" "$BASE_DIR/ops" "$BASE_DIR/backups" "$BASE_DIR/tool
 
 # Check if BusyBox is available, install it if needed
 BUSYBOX_CMD=""
-if ! command -v busybox > /dev/null 2>&1; then
+TOOLS_DIR="$BASE_DIR/tools"
+
+# Check if BusyBox is already installed in our tools directory
+if [ -x "$TOOLS_DIR/busybox" ]; then
+    echo "BusyBox already installed at $TOOLS_DIR/busybox (skipping download)"
+    BUSYBOX_CMD="$TOOLS_DIR/busybox"
+elif ! command -v busybox > /dev/null 2>&1; then
     echo "BusyBox is not installed. Installing static BusyBox..."
-    
+
     # Create tools directory if it doesn't exist
-    TOOLS_DIR="$BASE_DIR/tools"
     mkdir -p "$TOOLS_DIR"
-    
+
     # Path for the BusyBox binary
     BUSYBOX_PATH="$TOOLS_DIR/busybox"
-    
+
     # Check if wget or curl is available for downloading
     if command -v wget > /dev/null 2>&1; then
         echo "Using wget to download BusyBox..."
@@ -62,22 +67,22 @@ if ! command -v busybox > /dev/null 2>&1; then
         DOWNLOAD_SUCCESS=$?
     elif command -v curl > /dev/null 2>&1; then
         echo "Using curl to download BusyBox..."
-        curl -k -L -o "$BUSYBOX_PATH" "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox" 
+        curl -k -L -o "$BUSYBOX_PATH" "https://github.com/ryanwoodsmall/static-binaries/raw/refs/heads/master/i686/busybox"
         DOWNLOAD_SUCCESS=$?
     else
         echo "Error: Neither wget nor curl is available. Cannot download BusyBox."
         DOWNLOAD_SUCCESS=1
     fi
-    
+
     if [ $DOWNLOAD_SUCCESS -ne 0 ]; then
         echo "Error: Failed to download BusyBox."
         exit 1
     fi
-    
+
     # Make the binary executable
     chmod +x "$BUSYBOX_PATH"
     echo "BusyBox installed to $BUSYBOX_PATH"
-    
+
     # Try to create symlink in a PATH directory if possible
     if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
         ln -sf "$BUSYBOX_PATH" "/usr/local/bin/busybox"
@@ -97,7 +102,7 @@ if ! command -v busybox > /dev/null 2>&1; then
     fi
 else
     BUSYBOX_CMD="busybox"
-    echo "BusyBox is already installed."
+    echo "BusyBox is already installed in system PATH."
 fi
 
 # Include BusyBox directory in PATH for this session
@@ -119,9 +124,15 @@ fi
 
 # Check if curl is available, install it if needed
 CURL_CMD=""
-if ! command -v curl > /dev/null 2>&1; then
+CURL_PATH="$BASE_DIR/tools/curl"
+
+# Check if curl is already installed in our tools directory
+if [ -x "$CURL_PATH" ]; then
+    echo "curl already installed at $CURL_PATH (skipping download)"
+    CURL_CMD="$CURL_PATH"
+elif ! command -v curl > /dev/null 2>&1; then
     echo "curl is not installed. Installing..."
-    
+
     # Check if wget is available or use our BusyBox wget
     if command -v wget > /dev/null 2>&1; then
         DL_CMD="wget --no-check-certificate -q"
@@ -131,49 +142,48 @@ if ! command -v curl > /dev/null 2>&1; then
         echo "Error: Neither curl, wget, nor BusyBox wget is available."
         exit 1
     fi
-    
+
     # Get system architecture
     ARCH=$(get_architecture)
-    
+
     if [ "$ARCH" = "unknown" ]; then
         echo "Error: Could not determine system architecture."
         exit 1
     fi
-    
+
     # Create a temporary directory
     TEMP_DIR=$(mktemp -d)
     CURL_BINARY="$TEMP_DIR/curl"
-    
+
     echo "Downloading curl for $ARCH architecture..."
     if command -v wget > /dev/null 2>&1; then
         wget --no-check-certificate -q "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-$ARCH" -O "$CURL_BINARY"
     elif [ -n "$BUSYBOX_CMD" ]; then
         $BUSYBOX_CMD wget --no-check-certificate -q "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-$ARCH" -O "$CURL_BINARY"
     fi
-    
+
     if [ $? -ne 0 ]; then
         echo "Error: Failed to download curl."
         rm -rf "$TEMP_DIR"
         exit 1
     fi
-    
+
     # Make the binary executable
     chmod +x "$CURL_BINARY"
-    
+
     # Install curl to tools directory
-    CURL_PATH="$BASE_DIR/tools/curl"
     cp "$CURL_BINARY" "$CURL_PATH"
     chmod +x "$CURL_PATH"
     echo "curl installed to $CURL_PATH"
-    
+
     # Clean up temp directory
     rm -rf "$TEMP_DIR"
-    
+
     # Use the installed curl
     CURL_CMD="$CURL_PATH"
 else
     CURL_CMD="curl"
-    echo "curl is already installed."
+    echo "curl is already installed in system PATH."
 fi
 
 # Create temporary directory for downloading files
@@ -236,61 +246,143 @@ if [ -d "extract_temp/just-linux" ]; then
     
     # Check what's inside the just-linux directory
     if [ -f "extract_temp/just-linux/Justfile" ] || [ -f "extract_temp/just-linux/justfile" ]; then
-        echo "Found Justfile inside just-linux directory, copying all files and directories..."
-        
-        # Copy Justfile
-        if [ -f "extract_temp/just-linux/Justfile" ]; then
-            cp "extract_temp/just-linux/Justfile" "$BASE_DIR/"
-        elif [ -f "extract_temp/just-linux/justfile" ]; then
-            cp "extract_temp/just-linux/justfile" "$BASE_DIR/Justfile"
+        echo "Found Justfile inside just-linux directory, copying files (preserving existing)..."
+
+        # Copy Justfile only if it doesn't exist
+        if [ ! -f "$BASE_DIR/Justfile" ]; then
+            if [ -f "extract_temp/just-linux/Justfile" ]; then
+                echo "  Copying Justfile..."
+                cp "extract_temp/just-linux/Justfile" "$BASE_DIR/"
+            elif [ -f "extract_temp/just-linux/justfile" ]; then
+                echo "  Copying justfile as Justfile..."
+                cp "extract_temp/just-linux/justfile" "$BASE_DIR/Justfile"
+            fi
+        else
+            echo "  Justfile already exists (skipping)"
         fi
-        
-        # Copy scripts directory if it exists
+
+        # Copy scripts directory if it exists (only new files)
         if [ -d "extract_temp/just-linux/scripts" ]; then
-            echo "Copying scripts directory..."
-            cp -r "extract_temp/just-linux/scripts/"* "$BASE_DIR/scripts/" 2>/dev/null || true
+            echo "Copying scripts directory (preserving existing files)..."
+            for script in extract_temp/just-linux/scripts/*; do
+                script_name=$(basename "$script")
+                if [ ! -f "$BASE_DIR/scripts/$script_name" ]; then
+                    echo "  Adding new script: $script_name"
+                    cp "$script" "$BASE_DIR/scripts/" 2>/dev/null || true
+                else
+                    echo "  Script already exists (skipping): $script_name"
+                fi
+            done
         fi
-        
-        # Copy playbooks directory if it exists
+
+        # Copy playbooks directory if it exists (only new files)
         if [ -d "extract_temp/just-linux/playbooks" ]; then
-            echo "Copying playbooks directory..."
-            cp -r "extract_temp/just-linux/playbooks/"* "$BASE_DIR/playbooks/" 2>/dev/null || true
+            echo "Copying playbooks directory (preserving existing files)..."
+            for playbook in extract_temp/just-linux/playbooks/*; do
+                playbook_name=$(basename "$playbook")
+                if [ ! -f "$BASE_DIR/playbooks/$playbook_name" ]; then
+                    echo "  Adding new playbook: $playbook_name"
+                    cp "$playbook" "$BASE_DIR/playbooks/" 2>/dev/null || true
+                else
+                    echo "  Playbook already exists (skipping): $playbook_name"
+                fi
+            done
         fi
-        
-        # Copy group_vars directory if it exists
+
+        # Copy group_vars directory if it exists (only new files)
         if [ -d "extract_temp/just-linux/group_vars" ]; then
-            echo "Copying group_vars directory..."
-            cp -r "extract_temp/just-linux/group_vars/"* "$BASE_DIR/group_vars/" 2>/dev/null || true
+            echo "Copying group_vars directory (preserving existing files)..."
+            for varfile in extract_temp/just-linux/group_vars/*; do
+                varfile_name=$(basename "$varfile")
+                if [ ! -f "$BASE_DIR/group_vars/$varfile_name" ]; then
+                    echo "  Adding new var file: $varfile_name"
+                    cp "$varfile" "$BASE_DIR/group_vars/" 2>/dev/null || true
+                else
+                    echo "  Var file already exists (skipping): $varfile_name"
+                fi
+            done
         fi
-        
-        # Copy hosts.ini if it exists
+
+        # Copy hosts.ini if it doesn't exist
         if [ -f "extract_temp/just-linux/hosts.ini" ]; then
-            echo "Copying hosts.ini..."
-            cp "extract_temp/just-linux/hosts.ini" "$BASE_DIR/" 2>/dev/null || true
+            if [ ! -f "$BASE_DIR/hosts.ini" ]; then
+                echo "  Copying hosts.ini..."
+                cp "extract_temp/just-linux/hosts.ini" "$BASE_DIR/" 2>/dev/null || true
+            else
+                echo "  hosts.ini already exists (skipping)"
+            fi
         fi
-        
-        # Copy any other files at the root level
-        echo "Copying any other files at root level..."
+
+        # Copy any other files at the root level (only if they don't exist)
+        echo "Copying other root-level files (preserving existing)..."
         for file in extract_temp/just-linux/*; do
-            if [ -f "$file" ] && [ "$(basename "$file")" != "Justfile" ] && [ "$(basename "$file")" != "justfile" ] && [ "$(basename "$file")" != "hosts.ini" ]; then
-                cp "$file" "$BASE_DIR/" 2>/dev/null || true
+            file_name=$(basename "$file")
+            if [ -f "$file" ] && [ "$file_name" != "Justfile" ] && [ "$file_name" != "justfile" ] && [ "$file_name" != "hosts.ini" ]; then
+                if [ ! -f "$BASE_DIR/$file_name" ]; then
+                    echo "  Adding: $file_name"
+                    cp "$file" "$BASE_DIR/" 2>/dev/null || true
+                else
+                    echo "  File already exists (skipping): $file_name"
+                fi
             fi
         done
     else
         # This means the just-linux directory doesn't have the expected structure
         echo "Could not find Justfile inside just-linux directory"
-        # Try copying everything from just-linux to the base directory
-        cp -r "extract_temp/just-linux/"* "$BASE_DIR/" 2>/dev/null || true
+        echo "Copying files from just-linux (preserving existing)..."
+        for item in extract_temp/just-linux/*; do
+            item_name=$(basename "$item")
+            if [ ! -e "$BASE_DIR/$item_name" ]; then
+                cp -r "$item" "$BASE_DIR/" 2>/dev/null || true
+            else
+                echo "  Item already exists (skipping): $item_name"
+            fi
+        done
     fi
 else
-    echo "No 'just-linux' directory found, copying all extracted files to $BASE_DIR"
-    cp -r extract_temp/* "$BASE_DIR/" 2>/dev/null || true
+    echo "No 'just-linux' directory found, copying extracted files (preserving existing)..."
+    for item in extract_temp/*; do
+        item_name=$(basename "$item")
+        if [ ! -e "$BASE_DIR/$item_name" ]; then
+            cp -r "$item" "$BASE_DIR/" 2>/dev/null || true
+        else
+            echo "  Item already exists (skipping): $item_name"
+        fi
+    done
 fi
 
 # Set proper permissions
 echo "Setting permissions..."
 chmod -R 750 "$BASE_DIR"
 chmod 755 "$BASE_DIR"/scripts/*.sh 2>/dev/null || true
+
+# Download and install Chimera hardening tool
+echo "Downloading Chimera hardening tool..."
+CHIMERA_PATH="$BASE_DIR/ops/chimera"
+
+# Check if Chimera is already installed
+if [ -x "$CHIMERA_PATH" ]; then
+    echo "Chimera already installed at $CHIMERA_PATH (skipping download)"
+else
+    echo "Downloading Chimera from GitHub releases..."
+    if command -v wget > /dev/null 2>&1; then
+        wget --no-check-certificate -q "https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/chimera" -O "$CHIMERA_PATH"
+    elif [ -n "$BUSYBOX_CMD" ]; then
+        $BUSYBOX_CMD wget --no-check-certificate -q "https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/chimera" -O "$CHIMERA_PATH"
+    elif [ -n "$CURL_CMD" ]; then
+        $CURL_CMD -k -L -o "$CHIMERA_PATH" "https://github.com/CSUSB-CISO/csusb-ccdc/releases/download/CCDC-2024-2025/chimera"
+    else
+        echo "Error: No method available to download Chimera."
+    fi
+    
+    # Make Chimera executable if download was successful
+    if [ -f "$CHIMERA_PATH" ]; then
+        chmod +x "$CHIMERA_PATH"
+        echo "Chimera installed to $CHIMERA_PATH"
+    else
+        echo "Warning: Failed to download Chimera. The 'just harden' command will not work."
+    fi
+fi
 
 # Install 'just' if not already installed
 if ! command -v just &> /dev/null; then

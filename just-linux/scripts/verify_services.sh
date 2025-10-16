@@ -147,10 +147,16 @@ fi
 
 # Check for any unexpected changes to the service configurations
 echo "=== Checking for Recent Service Configuration Changes ==="
-if command_exists find; then
+if command_exists fd; then
+    echo "Files in /etc/systemd modified in the last 7 days:"
+    fd --type f --changed-within 7d --base-directory /etc/systemd --exec ls -la 2>/dev/null || echo "No recent changes found"
+
+    echo "Files in /etc/init.d modified in the last 7 days:"
+    fd --type f --changed-within 7d --base-directory /etc/init.d --exec ls -la 2>/dev/null || echo "No recent changes found"
+elif command_exists find; then
     echo "Files in /etc/systemd modified in the last 7 days:"
     find /etc/systemd -type f -mtime -7 -ls 2>/dev/null || echo "No recent changes found"
-    
+
     echo "Files in /etc/init.d modified in the last 7 days:"
     find /etc/init.d -type f -mtime -7 -ls 2>/dev/null || echo "No recent changes found"
 else

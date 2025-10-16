@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Function to check if running as root
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        echo -e "${RED}Please run as root or with sudo privileges${NC}"
+        echo -e "${RED}Please run as root${NC}"
         exit 1
     fi
 }
@@ -211,7 +211,7 @@ setup_user_permissions() {
         groupadd docker
     fi
     
-    # Get the current user (if script is run with sudo)
+    # Get the current user (check if running as root via su)
     current_user=${SUDO_USER:-$USER}
     
     # Add the user to the docker group
@@ -271,8 +271,8 @@ main() {
     docker info | head -10
     
     echo -e "\n${GREEN}You can now use Docker!${NC}"
-    echo -e "If you're running the script with sudo, remember to log out and back in"
-    echo -e "to use Docker without sudo. Alternatively, you can run: ${YELLOW}newgrp docker${NC}"
+    echo -e "Remember to log out and back in for group changes to take effect."
+    echo -e "Alternatively, you can run: ${YELLOW}newgrp docker${NC}"
 }
 
 # Run the main function
